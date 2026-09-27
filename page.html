@@ -96,7 +96,22 @@
       if (m.edited) meta.push('edited');
       if (m.reply_to_message_id) meta.push('reply to #' + m.reply_to_message_id);
       box.appendChild(el('div', 'meta', meta.join(' · ')));
-      box.appendChild(el('div', '', m.text));
+      if (m.photo) {
+        const img = el('img');
+        img.src = '/sim/file/' + encodeURIComponent(m.photo.file_id);
+        img.alt = m.photo.name;
+        img.style.cssText = 'max-width:240px;display:block;border-radius:8px;margin:4px 0';
+        box.appendChild(img);
+      }
+      if (m.document) {
+        box.appendChild(el('div', '', '[document ' + m.document.name + ']'));
+      }
+      if (m.caption) {
+        box.appendChild(el('div', '', m.caption));
+      }
+      if (!m.photo && !m.document) {
+        box.appendChild(el('div', '', m.text));
+      }
       if (m.keyboard) {
         for (const row of m.keyboard) {
           const kb = el('div', 'kb');

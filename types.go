@@ -44,6 +44,24 @@ type InlineKeyboardMarkup struct {
 	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
 }
 
+// PhotoSize is one size of a photo a message carries.
+type PhotoSize struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	FileSize     int    `json:"file_size,omitempty"`
+}
+
+// Document is a file a message carries as a document.
+type Document struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	FileName     string `json:"file_name,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int    `json:"file_size,omitempty"`
+}
+
 // Message mirrors the subset of the Bot API Message object the gateway reads
 // and writes.
 type Message struct {
@@ -53,6 +71,9 @@ type Message struct {
 	Date           int64                 `json:"date"`
 	EditDate       int64                 `json:"edit_date,omitempty"`
 	Text           string                `json:"text,omitempty"`
+	Caption        string                `json:"caption,omitempty"`
+	Photo          []PhotoSize           `json:"photo,omitempty"`
+	Document       *Document             `json:"document,omitempty"`
 	Entities       []MessageEntity       `json:"entities,omitempty"`
 	ReplyToMessage *Message              `json:"reply_to_message,omitempty"`
 	ReplyMarkup    *InlineKeyboardMarkup `json:"reply_markup,omitempty"`

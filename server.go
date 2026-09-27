@@ -62,6 +62,16 @@ type Call struct {
 	Response json.RawMessage   `json:"response"`
 }
 
+// storedFile is a file the bot uploaded with sendPhoto or sendDocument.
+type storedFile struct {
+	id       string
+	name     string
+	mimeType string
+	data     []byte
+	width    int
+	height   int
+}
+
 // Server is the fake Bot API. Every method is safe for concurrent use.
 type Server struct {
 	opts Options
@@ -79,6 +89,8 @@ type Server struct {
 	commands   []BotCommand
 	nextCbq    int
 	cbqChat    map[string]int64 // callback query id → chat the tap came from
+	files      map[string]*storedFile
+	nextFileID int
 	now        func() time.Time
 }
 
@@ -102,6 +114,7 @@ func New(opts Options) *Server {
 		chats:      map[int64]*chatState{},
 		faults:     map[string]*Fault{},
 		cbqChat:    map[string]int64{},
+		files:      map[string]*storedFile{},
 		now:        time.Now,
 	}
 }
@@ -123,12 +136,13 @@ func (s *Server) Close() {
 	s.closeOnce.Do(func() { close(s.closing) })
 }
 
-// Reset forgets the chats, the outbox, the faults and the commands. Update
-// ids keep growing: a bot that is polling remembers the last id it confirmed
-// and would drop anything numbered below it. The allowed_updates subscription
-// stays as well, on purpose: Telegram keeps it with the token, not with the
-// chats, so a reset between two runs of a bot leaves it what the previous run
-// asked for - SetAllowedUpdates puts it back to anything else.
+// Reset forgets the chats, the outbox, the faults, the commands and the
+// uploaded files. Update ids keep growing: a bot that is polling remembers
+// the last id it confirmed and would drop anything numbered below it. The
+// allowed_updates subscription stays as well, on purpose: Telegram keeps it
+// with the token, not with the chats, so a reset between two runs of a bot
+// leaves it what the previous run asked for - SetAllowedUpdates puts it back
+// to anything else.
 func (s *Server) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -139,6 +153,8 @@ func (s *Server) Reset() {
 	s.commands = nil
 	s.nextCbq = 0
 	s.cbqChat = map[string]int64{}
+	s.files = map[string]*storedFile{}
+	s.nextFileID = 0
 	s.wakeLocked()
 }
 
@@ -162,6 +178,17 @@ func (s *Server) AllowedUpdates() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.allowed...)
+}
+
+// File returns a copy of the bytes the bot uploaded under a file_id.
+func (s *Server) File(id string) ([]byte, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.files[id]
+	if f == nil {
+		return nil, false
+	}
+	return append([]byte(nil), f.data...), true
 }
 
 // Calls returns the outbox, oldest first; method filters by Bot API method

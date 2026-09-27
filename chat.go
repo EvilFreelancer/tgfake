@@ -31,6 +31,7 @@ type storedMessage struct {
 	edited    bool
 	deleted   bool
 	rich      bool
+	file      *storedFile // the upload a photo or document message carries
 }
 
 type draft struct {
@@ -110,6 +111,11 @@ func (m *storedMessage) clone() *Message {
 		out.ReplyToMessage = &q
 	}
 	out.Entities = append([]MessageEntity(nil), m.msg.Entities...)
+	out.Photo = append([]PhotoSize(nil), m.msg.Photo...)
+	if m.msg.Document != nil {
+		d := *m.msg.Document
+		out.Document = &d
+	}
 	return &out
 }
 
@@ -177,12 +183,25 @@ type MessageView struct {
 	From             string                   `json:"from"` // "bot" or "user"
 	Username         string                   `json:"username,omitempty"`
 	Text             string                   `json:"text"`
+	Caption          string                   `json:"caption,omitempty"`
+	Photo            *FileView                `json:"photo,omitempty"`
+	Document         *FileView                `json:"document,omitempty"`
 	ParseMode        string                   `json:"parse_mode,omitempty"`
 	ReplyToMessageID int                      `json:"reply_to_message_id,omitempty"`
 	Edited           bool                     `json:"edited"`
 	Deleted          bool                     `json:"deleted"`
 	Rich             bool                     `json:"rich"`
 	Keyboard         [][]InlineKeyboardButton `json:"keyboard,omitempty"`
+}
+
+// FileView is the photo or document of a MessageView.
+type FileView struct {
+	FileID   string `json:"file_id"`
+	Name     string `json:"name"`
+	MimeType string `json:"mime_type,omitempty"`
+	Size     int    `json:"size"`
+	Width    int    `json:"width,omitempty"`
+	Height   int    `json:"height,omitempty"`
 }
 
 // DraftView is one rich-message draft of a ChatView: Telegram shows only the
@@ -238,6 +257,7 @@ func (c *chatState) view(now time.Time) ChatView {
 			MessageID: m.msg.MessageID,
 			From:      "user",
 			Text:      m.msg.Text,
+			Caption:   m.msg.Caption,
 			ParseMode: m.parseMode,
 			Edited:    m.edited,
 			Deleted:   m.deleted,
@@ -253,6 +273,22 @@ func (c *chatState) view(now time.Time) ChatView {
 		}
 		if m.msg.ReplyMarkup != nil {
 			mv.Keyboard = m.clone().ReplyMarkup.InlineKeyboard
+		}
+		if m.file != nil {
+			fv := &FileView{
+				FileID:   m.file.id,
+				Name:     m.file.name,
+				MimeType: m.file.mimeType,
+				Size:     len(m.file.data),
+				Width:    m.file.width,
+				Height:   m.file.height,
+			}
+			if len(m.msg.Photo) > 0 {
+				mv.Photo = fv
+			}
+			if m.msg.Document != nil {
+				mv.Document = fv
+			}
 		}
 		v.Messages = append(v.Messages, mv)
 	}
@@ -299,7 +335,22 @@ func (v ChatView) Text() string {
 		if m.From == "user" && m.Username != "" {
 			who = m.Username
 		}
-		sb.WriteString("[" + itoa(m.MessageID) + "] " + who + ": " + strings.ReplaceAll(m.Text, "\n", "\n    ") + "\n")
+		sb.WriteString("[" + itoa(m.MessageID) + "] " + who + ": ")
+		switch {
+		case m.Photo != nil:
+			sb.WriteString("[photo " + m.Photo.Name + " " + itoa(m.Photo.Width) + "x" + itoa(m.Photo.Height) + "]")
+			if m.Caption != "" {
+				sb.WriteString(" " + strings.ReplaceAll(m.Caption, "\n", "\n    "))
+			}
+		case m.Document != nil:
+			sb.WriteString("[document " + m.Document.Name + "]")
+			if m.Caption != "" {
+				sb.WriteString(" " + strings.ReplaceAll(m.Caption, "\n", "\n    "))
+			}
+		default:
+			sb.WriteString(strings.ReplaceAll(m.Text, "\n", "\n    "))
+		}
+		sb.WriteString("\n")
 		for _, row := range m.Keyboard {
 			sb.WriteString("   ")
 			for _, b := range row {
