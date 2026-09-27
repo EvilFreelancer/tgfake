@@ -1,8 +1,15 @@
 package tgfake
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -46,6 +53,10 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.writeResult(w, method, params, s.Commands())
 	case "sendmessage":
 		s.sendMessage(w, method, params)
+	case "sendphoto":
+		s.sendMedia(w, r, method, params, "photo")
+	case "senddocument":
+		s.sendMedia(w, r, method, params, "document")
 	case "editmessagetext", "editmessagereplymarkup":
 		s.editMessage(w, method, params)
 	case "deletemessage":
@@ -69,9 +80,15 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseParams reads the request the way the Bot API does: query string and
-// urlencoded form, or a JSON object whose nested values stay JSON text - the
-// form a library encodes reply_markup and rich_message in anyway.
+// urlencoded form, a JSON object whose nested values stay JSON text - the
+// form a library encodes reply_markup and rich_message in anyway - or a
+// multipart form, whose file parts stay on the request for the method to
+// read while the fields land in the same values.
 func parseParams(r *http.Request) url.Values {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		_ = r.ParseMultipartForm(32 << 20)
+		return r.Form
+	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		out := url.Values{}
 		for k, v := range r.URL.Query() {
@@ -220,6 +237,97 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 	}
 	msg.ReplyMarkup = markup
 	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
+	result := stored.clone()
+	s.mu.Unlock()
+	s.writeResult(w, method, params, result)
+}
+
+// mediaCaptionMax is Telegram's limit on the caption of a media message, in
+// characters.
+const mediaCaptionMax = 1024
+
+// photoMaxSize and documentMaxSize are the upload limits of sendPhoto and
+// sendDocument, matching what api.telegram.org accepts from a bot.
+const (
+	photoMaxSize    = 10 << 20
+	documentMaxSize = 50 << 20
+)
+
+// sendMedia answers sendPhoto and sendDocument: the file arrives as the
+// first multipart part named by field, the chat and caption as ordinary
+// form fields. Only the upload variant exists: a file_id or a URL string in
+// place of the upload is refused as a request with no file in it.
+func (s *Server) sendMedia(w http.ResponseWriter, r *http.Request, method string, params url.Values, field string) {
+	chatID, ok := chatIDOf(params)
+	if !ok {
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: chat_id is empty", 0)
+		return
+	}
+	var header *multipart.FileHeader
+	if r.MultipartForm != nil {
+		if headers := r.MultipartForm.File[field]; len(headers) > 0 {
+			header = headers[0]
+		}
+	}
+	if header == nil {
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: there is no "+field+" in the request", 0)
+		return
+	}
+	limit := int64(documentMaxSize)
+	if field == "photo" {
+		limit = photoMaxSize
+	}
+	part, err := header.Open()
+	if err != nil {
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: there is no "+field+" in the request", 0)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(part, limit+1))
+	_ = part.Close()
+	if err != nil {
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't read the "+field, 0)
+		return
+	}
+	if int64(len(data)) > limit {
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: file is too big", 0)
+		return
+	}
+	caption := params.Get("caption")
+	if utf8.RuneCountInString(caption) > mediaCaptionMax {
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message caption is too long", 0)
+		return
+	}
+	var cfg image.Config
+	if field == "photo" {
+		var err error
+		cfg, _, err = image.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: IMAGE_PROCESS_FAILED", 0)
+			return
+		}
+	}
+	mimeType, _, _ := strings.Cut(http.DetectContentType(data), ";")
+	params.Set(field, fmt.Sprintf("%s (%d bytes)", header.Filename, len(data)))
+	s.mu.Lock()
+	chat := s.ensureChatLocked(chatID, "", "", nil)
+	quoted, problem := replyTargetLocked(chat, params)
+	if problem != "" {
+		s.mu.Unlock()
+		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
+		return
+	}
+	s.nextFileID++
+	id := "file_" + strconv.Itoa(s.nextFileID)
+	f := &storedFile{id: id, name: header.Filename, mimeType: mimeType, data: data, width: cfg.Width, height: cfg.Height}
+	s.files[id] = f
+	msg := &Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: caption, ReplyToMessage: quoted}
+	if field == "photo" {
+		msg.Photo = []PhotoSize{{FileID: id, FileUniqueID: "u" + id, Width: cfg.Width, Height: cfg.Height, FileSize: len(data)}}
+	} else {
+		msg.Document = &Document{FileID: id, FileUniqueID: "u" + id, FileName: header.Filename, MimeType: mimeType, FileSize: len(data)}
+	}
+	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
+	stored.file = f
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)

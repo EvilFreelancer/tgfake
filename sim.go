@@ -15,6 +15,7 @@ import (
 //	GET  /sim/outbox?method=&since=
 //	GET  /sim/outbox/count?method=
 //	GET  /sim/chat/{id}?format=text
+//	GET  /sim/file/{id}
 //	GET  /sim/chats
 //	GET  /sim/state
 //	POST /sim/fault             {method, code, description, retry_after, times} or {method, clear: true}
@@ -26,6 +27,7 @@ func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sim/outbox", s.simOutbox)
 	mux.HandleFunc("GET /sim/outbox/count", s.simOutboxCount)
 	mux.HandleFunc("GET /sim/chat/{id}", s.simChat)
+	mux.HandleFunc("GET /sim/file/{id}", s.simFile)
 	mux.HandleFunc("GET /sim/chats", s.simChats)
 	mux.HandleFunc("GET /sim/state", s.simState)
 	mux.HandleFunc("POST /sim/fault", s.simFault)
@@ -92,6 +94,20 @@ func (s *Server) simChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// simFile serves the bytes the bot uploaded under a file_id, so the page can
+// show a photo or download a document.
+func (s *Server) simFile(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	f := s.files[r.PathValue("id")]
+	s.mu.Unlock()
+	if f == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such file"})
+		return
+	}
+	w.Header().Set("Content-Type", f.mimeType)
+	_, _ = w.Write(f.data)
 }
 
 func (s *Server) simChats(w http.ResponseWriter, _ *http.Request) {
