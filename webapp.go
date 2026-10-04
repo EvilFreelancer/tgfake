@@ -100,6 +100,10 @@ func (s *Server) MenuButton(chat int64) MenuButton {
 }
 
 func (s *Server) menuButtonLocked(chat int64) MenuButton {
+	// Telegram shows a bot's menu button in private chats only.
+	if chat != 0 && s.chatTypeLocked(chat) != "private" {
+		return MenuButton{Type: "commands"}
+	}
 	if b := s.chatMenus[chat]; chat != 0 && b != nil {
 		return cloneMenuButton(*b)
 	}
@@ -117,23 +121,27 @@ func cloneMenuButton(b MenuButton) MenuButton {
 	return b
 }
 
+// menuButtonChat reads the chat_id of a menu button method the way the Bot
+// API does: as a user, so anything but a positive id (a group's included) is
+// refused. Without chat_id the method is about the bot's own button, chat 0.
+func (s *Server) menuButtonChat(w http.ResponseWriter, method string, params url.Values) (int64, bool) {
+	raw := strings.TrimSpace(params.Get("chat_id"))
+	if raw == "" {
+		return 0, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: Invalid chat_id specified", 0)
+		return 0, false
+	}
+	return id, true
+}
+
 // setChatMenuButton answers setChatMenuButton: a private chat's own button
 // with chat_id, the bot's without. Type "default" (or no menu_button at all)
-// removes the chat's own button, or puts the bot's back to its commands.
+// removes the chat's own button, or puts the bot's back to its commands. The
+// button is checked before the chat, as the Bot API does.
 func (s *Server) setChatMenuButton(w http.ResponseWriter, method string, params url.Values) {
-	var chat int64
-	if raw := strings.TrimSpace(params.Get("chat_id")); raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || id == 0 {
-			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: chat not found", 0)
-			return
-		}
-		if id < 0 {
-			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: the menu button can be changed only in private chats", 0)
-			return
-		}
-		chat = id
-	}
 	button := MenuButton{Type: "default"}
 	if raw := strings.TrimSpace(params.Get("menu_button")); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &button); err != nil {
@@ -162,6 +170,10 @@ func (s *Server) setChatMenuButton(w http.ResponseWriter, method string, params 
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: unsupported menu button type", 0)
 		return
 	}
+	chat, ok := s.menuButtonChat(w, method, params)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	switch {
 	case chat != 0 && button.Type == "default":
@@ -179,14 +191,9 @@ func (s *Server) setChatMenuButton(w http.ResponseWriter, method string, params 
 
 // getChatMenuButton answers getChatMenuButton with the button the chat shows.
 func (s *Server) getChatMenuButton(w http.ResponseWriter, method string, params url.Values) {
-	var chat int64
-	if raw := strings.TrimSpace(params.Get("chat_id")); raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil {
-			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: chat not found", 0)
-			return
-		}
-		chat = id
+	chat, ok := s.menuButtonChat(w, method, params)
+	if !ok {
+		return
 	}
 	s.writeResult(w, method, params, s.MenuButton(chat))
 }

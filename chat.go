@@ -245,7 +245,7 @@ func (s *Server) Chat(id int64) ChatView {
 	menu := s.menuButtonLocked(id)
 	c := s.chats[id]
 	if c == nil {
-		return ChatView{ChatID: id, Type: "private", Messages: []MessageView{}, Drafts: []DraftView{}, Callbacks: []CallbackAnswer{}, MenuButton: &menu}
+		return ChatView{ChatID: id, Type: s.chatTypeLocked(id), Messages: []MessageView{}, Drafts: []DraftView{}, Callbacks: []CallbackAnswer{}, MenuButton: &menu}
 	}
 	v := c.view(s.now())
 	v.MenuButton = &menu

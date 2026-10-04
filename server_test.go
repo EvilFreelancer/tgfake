@@ -144,7 +144,7 @@ func TestKeyboard_CallbackDataLimit(t *testing.T) {
 	}
 	status, body = s.call("editMessageText", url.Values{"chat_id": {"4242"}, "message_id": {"1"}, "text": {"menu 2"},
 		"reply_markup": {`{"inline_keyboard":[[{"text":"no action"}]]}`}})
-	if status != http.StatusBadRequest || !strings.Contains(body["description"].(string), "BUTTON") {
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: Text buttons are not allowed in the inline keyboard" {
 		t.Fatalf("a button with nothing behind it: %d %v", status, body)
 	}
 	status, _ = s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"link"},
@@ -668,11 +668,18 @@ func TestWebAppButton_URLRules(t *testing.T) {
 			t.Fatalf("web_app URL %q: %d %v, want 400 naming the URL", bad, status, body)
 		}
 	}
-	// One kind of action per button, as Telegram requires.
+	// One action per button. Telegram takes the first of several in its own
+	// order; the stand refuses the button, so an ambiguous one never passes.
 	status, body := s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"open"},
 		"reply_markup": {`{"inline_keyboard":[[{"text":"App","callback_data":"x","web_app":{"url":"https://coddy.example.com/"}}]]}`}})
 	if status != http.StatusBadRequest || !strings.Contains(body["description"].(string), "BUTTON_TYPE_INVALID") {
 		t.Fatalf("a button with callback_data and web_app: %d %v", status, body)
+	}
+	// A button with no action at all is refused the way Telegram does.
+	status, body = s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"open"},
+		"reply_markup": {`{"inline_keyboard":[[{"text":"App"}]]}`}})
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: Text buttons are not allowed in the inline keyboard" {
+		t.Fatalf("a button with no action: %d %v", status, body)
 	}
 }
 
@@ -761,6 +768,41 @@ func TestMenuButton_Refusals(t *testing.T) {
 	}
 	if got := s.fake.MenuButton(0); got.Type != "commands" {
 		t.Fatalf("refused calls must leave the menu button alone: %+v", got)
+	}
+}
+
+// Telegram shows a bot's menu button in private chats only, and the Bot API
+// reads the chat_id of both menu button methods as a user: a group's id is
+// refused, with the menu button checked first on a set.
+func TestMenuButton_PrivateChatsOnly(t *testing.T) {
+	s := newStand(t, Options{})
+	app := `{"type":"web_app","text":"Coddy","web_app":{"url":"https://coddy.example.com/"}}`
+	if status, body := s.call("setChatMenuButton", url.Values{"menu_button": {app}}); status != http.StatusOK {
+		t.Fatalf("the bot's menu button: %d %v", status, body)
+	}
+	if m := s.fake.Chat(4242).MenuButton; m == nil || m.Type != "web_app" {
+		t.Fatalf("a private chat's menu button: %+v", m)
+	}
+	if _, err := s.fake.LaunchWebApp(WebAppLaunch{ChatID: 4242}); err != nil {
+		t.Fatalf("the menu button of a private chat does not open: %v", err)
+	}
+	if m := s.fake.Chat(-100500); m.Type != "group" || m.MenuButton == nil || m.MenuButton.Type != "commands" {
+		t.Fatalf("a group shows %s with the menu button %+v", m.Type, m.MenuButton)
+	}
+	if _, err := s.fake.LaunchWebApp(WebAppLaunch{ChatID: -100500}); err == nil {
+		t.Fatal("a group opened a Mini App from a menu button it does not have")
+	}
+	for _, chatID := range []string{"-100500", "0", "abc"} {
+		for _, method := range []string{"getChatMenuButton", "setChatMenuButton"} {
+			status, body := s.call(method, url.Values{"chat_id": {chatID}, "menu_button": {`{"type":"commands"}`}})
+			if status != http.StatusBadRequest || body["description"] != "Bad Request: Invalid chat_id specified" {
+				t.Errorf("%s for chat_id %s: %d %v", method, chatID, status, body)
+			}
+		}
+	}
+	status, body := s.call("setChatMenuButton", url.Values{"chat_id": {"-100500"}, "menu_button": {`{"type":"weird"}`}})
+	if status != http.StatusBadRequest || body["description"] == "Bad Request: Invalid chat_id specified" {
+		t.Errorf("the menu button is checked before the chat: %d %v", status, body)
 	}
 }
 

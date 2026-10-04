@@ -652,11 +652,12 @@ func parseKeyboard(raw string) (*InlineKeyboardMarkup, string) {
 const callbackDataMax = 64
 
 // validateKeyboard refuses what api.telegram.org refuses: a button with
-// nothing behind it or with more than one action, callback_data over the
-// limit - the mistake that is invisible until a real chat shows a keyboard
-// that never arrives - and a web_app button outside a private chat or to an
-// address Telegram would not open. It returns the error description, or ""
-// for a keyboard Telegram would take in a chat of chatType.
+// nothing behind it, callback_data over the limit - the mistake that is
+// invisible until a real chat shows a keyboard that never arrives - and a
+// web_app button outside a private chat or to an address Telegram would not
+// open. It also refuses a button with more than one action, which Telegram
+// would read as its first. It returns the error description, or "" for a
+// keyboard the stand takes in a chat of chatType.
 func validateKeyboard(kb *InlineKeyboardMarkup, chatType string) string {
 	if kb == nil {
 		return ""
@@ -669,7 +670,12 @@ func validateKeyboard(kb *InlineKeyboardMarkup, chatType string) string {
 					actions++
 				}
 			}
-			if actions != 1 {
+			switch {
+			case actions == 0:
+				return "Bad Request: Text buttons are not allowed in the inline keyboard"
+			case actions > 1:
+				// Telegram takes the first action in its own order; the
+				// stand refuses the button, so an ambiguous one never passes.
 				return "Bad Request: BUTTON_TYPE_INVALID"
 			}
 			if len(b.CallbackData) > callbackDataMax {
