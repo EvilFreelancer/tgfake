@@ -29,19 +29,24 @@
   .call.err .m { color: #d33; }
   .tools { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; font-size: 12px; }
   .kb button.webapp::after { content: " \2197"; opacity: .7; }
-  body.mini-open { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  body.mini-open { grid-template-columns: minmax(0, 1fr) 480px minmax(0, 1fr); }
   @media (max-width: 1100px) { body.mini-open { grid-template-columns: 1fr; height: auto; } }
   #miniapp[hidden] { display: none; }
-  #miniapp { align-items: flex-start; gap: 8px; }
+  #miniapp { align-items: flex-start; gap: 8px; min-width: 0; overflow: auto; }
   .mini-tools { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; max-width: 460px; }
-  .phone { position: relative; border: 10px solid #111; border-radius: 28px; background: #000; overflow: hidden; box-sizing: content-box; }
-  .phone-head { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 10px; box-sizing: border-box; background: #212121; color: #fff; font-size: 14px; }
+  /* The phone: the Mini App slides up from the bottom of the screen, and half
+     open it shows its top part there, the chat still in sight above it. */
+  .phone { position: relative; flex: none; border: 10px solid #111; border-radius: 28px; overflow: hidden; box-sizing: content-box;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    background: repeating-linear-gradient(0deg, #17212b 0 46px, #1d2a36 46px 48px); }
+  .phone-head { flex: none; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 10px; box-sizing: border-box; background: #212121; color: #fff; font-size: 14px; border-radius: 12px 12px 0 0; }
   .phone-head button { font: inherit; background: none; border: 0; color: inherit; cursor: pointer; padding: 4px 6px; }
   .phone-head .title { flex: 1; text-align: center; font-weight: 600; }
-  .phone-view { position: relative; overflow: hidden; background: #000; }
+  .phone-view { flex: none; position: relative; overflow: hidden; background: #000; }
   .phone-view iframe { display: block; border: 0; width: 100%; background: transparent; }
   .phone-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #aaa; background: #212121; font-size: 13px; }
-  .phone-keyboard { height: 0; background: repeating-linear-gradient(90deg, #3a3a3c 0 34px, #2c2c2e 34px 38px); color: #aaa; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+  .phone-loading[hidden] { display: none; }
+  .phone-keyboard { flex: none; height: 0; overflow: hidden; background: repeating-linear-gradient(90deg, #3a3a3c 0 34px, #2c2c2e 34px 38px); color: #aaa; font-size: 12px; display: flex; align-items: center; justify-content: center; }
   #miniappLog { font-family: ui-monospace, monospace; font-size: 11px; max-height: 14em; overflow: auto; border: 1px solid #8884; border-radius: 6px; padding: 6px; width: 100%; box-sizing: border-box; white-space: pre-wrap; word-break: break-all; }
   #miniappLog .in { color: #2e7d32; }
   #miniappLog .out { color: #1565c0; }
@@ -312,7 +317,15 @@
         case 'web_app_setup_back_button': this.backVisible = !!(data && data.is_visible); break;
         case 'web_app_setup_swipe_behavior': this.swipes = !(data && data.allow_vertical_swipe === false); break;
         case 'web_app_setup_closing_behavior': this.closingConfirmation = !!(data && data.need_confirmation); break;
-        case 'web_app_set_header_color': this.headerColor = (data && (data.color || data.color_key)) || ''; if (data && data.color) $('miniappHead').style.background = data.color; break;
+        case 'web_app_set_header_color':
+          this.headerColor = (data && (data.color || data.color_key)) || '';
+          if (data && data.color) {
+            const head = $('miniappHead');
+            head.style.background = data.color;
+            // Telegram picks the text colour that reads on the header.
+            head.style.color = isDark(data.color) ? '#ffffff' : '#000000';
+          }
+          break;
         case 'web_app_set_background_color': this.backgroundColor = (data && data.color) || ''; if (data && data.color) $('miniappView').style.background = data.color; break;
         case 'web_app_set_bottom_bar_color': this.bottomBarColor = (data && data.color) || ''; break;
         case 'web_app_open_link': if (data && data.url) window.open(data.url, '_blank', 'noopener'); break;
@@ -335,6 +348,13 @@
     back() { this.post('back_button_pressed'); },
   };
   let botName = '';
+  // isDark is the SDK's brightness rule for a #rrggbb colour.
+  function isDark(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+    if (!m) return true;
+    const v = parseInt(m[1], 16), r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+    return Math.sqrt(0.299 * r * r + 0.587 * g * g + 0.114 * b * b) < 120;
+  }
   window.addEventListener('message', (ev) => {
     const frame = $('miniappFrame');
     if (!frame.contentWindow || ev.source !== frame.contentWindow) return;
