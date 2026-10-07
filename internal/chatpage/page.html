@@ -187,6 +187,15 @@
       const box = el('div', 'draft');
       box.appendChild(el('div', 'meta', 'draft ' + d.draft_id + ' · revision ' + d.revisions));
       box.appendChild(el('div', '', d.markdown));
+      if (d.can_stop) {
+        const stop = el('button', '', 'Stop');
+        stop.type = 'button';
+        stop.addEventListener('click', async () => {
+          await post('/sim/draft/stop', { chat_id: chatID, draft_id: d.draft_id });
+          refreshChat();
+        });
+        box.appendChild(stop);
+      }
       log.appendChild(box);
     }
     if (v.typing) log.appendChild(el('div', 'typing', 'typing…'));

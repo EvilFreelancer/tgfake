@@ -11,8 +11,9 @@ purpose. No token, no phone, no network.
 - **A real Bot API surface.** `getMe`, long-polled `getUpdates` with
   `offset` and `allowed_updates`, `sendMessage`, `editMessageText`,
   `answerCallbackQuery`, photos and documents, chat actions, bot commands,
-  the menu button and the Bot API 10.1 rich messages and drafts. Forms, JSON
-  and multipart are all accepted, so any Bot API library works unchanged.
+  the menu button, and the Bot API 10.1 rich messages and drafts with the
+  10.3 Stop button. Forms, JSON and multipart are all accepted, so any Bot
+  API library works unchanged.
 - **Strict where Telegram is strict.** An edit that changes nothing, a reply
   to a message that is not there, an answer to an unknown callback query, a
   second answer to the same one, `callback_data` over 64 bytes, a `null`

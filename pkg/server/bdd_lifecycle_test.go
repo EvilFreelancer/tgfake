@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"sync/atomic"
 	"testing"
@@ -42,6 +43,39 @@ func TestFakeLifecycleFeature(t *testing.T) {
 				if body["ok"] != true {
 					t.Fatalf("draft rejected: %v", body)
 				}
+			})
+			sc.When(`^the bot streams a rich preview with a Stop button$`, func() error {
+				_, body := s.call("sendRichMessageDraft", url.Values{
+					"chat_id":      {"4242"},
+					"draft_id":     {"-7"},
+					"can_stop":     {"true"},
+					"rich_message": {`{"markdown":"partial"}`},
+				})
+				if body["ok"] != true {
+					return fmt.Errorf("draft rejected: %v", body)
+				}
+				return nil
+			})
+			sc.When(`^the person presses Stop under it$`, func() error {
+				status, body := s.sim("POST", "/sim/draft/stop", map[string]any{})
+				if status != http.StatusOK {
+					return fmt.Errorf("stop refused: %d %v", status, body)
+				}
+				return nil
+			})
+			sc.Then(`^the bot's next poll carries the stopped draft$`, func() error {
+				_, body := s.call("getUpdates", nil)
+				batch := updates(t, body)
+				if len(batch) != 1 {
+					return fmt.Errorf("poll carried %v", batch)
+				}
+
+				stop, _ := batch[0]["stopped_message_generation"].(map[string]any)
+				chat, _ := stop["chat"].(map[string]any)
+				if stop["draft_id"] != float64(-7) || chat["id"] != float64(4242) || chat["type"] != "private" {
+					return fmt.Errorf("poll carried %v", batch)
+				}
+				return nil
 			})
 			sc.When(`^(\d+) seconds pass without a new revision$`, func(seconds int) {
 				elapsed.Add(int64(time.Duration(seconds) * time.Second))

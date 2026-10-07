@@ -14,6 +14,7 @@ import (
 //
 //	POST /sim/message           {chat_id, chat_type, user_id, username, text, reply_to_message_id, mention}
 //	POST /sim/callback          {chat_id, user_id, message_id, data} or {chat_id, label}
+//	POST /sim/draft/stop        {chat_id, draft_id}
 //	GET  /sim/outbox?method=&since=
 //	GET  /sim/outbox/count?method=
 //	GET  /sim/chat/{id}?format=text
@@ -28,6 +29,7 @@ import (
 func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sim/message", s.simMessage)
 	mux.HandleFunc("POST /sim/callback", s.simCallback)
+	mux.HandleFunc("POST /sim/draft/stop", s.simDraftStop)
 	mux.HandleFunc("GET /sim/outbox", s.simOutbox)
 	mux.HandleFunc("GET /sim/outbox/count", s.simOutboxCount)
 	mux.HandleFunc("GET /sim/chat/{id}", s.simChat)
@@ -69,6 +71,19 @@ func (s *Server) simCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"update_id": upd, "callback_query_id": id})
+}
+
+func (s *Server) simDraftStop(w http.ResponseWriter, r *http.Request) {
+	var in DraftStop
+	if !readJSON(w, r, &in) {
+		return
+	}
+	upd, err := s.StopDraft(in)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"update_id": upd})
 }
 
 func (s *Server) simOutbox(w http.ResponseWriter, r *http.Request) {

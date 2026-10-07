@@ -61,7 +61,7 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `sendChatAction` | `chat_id` (`action` is recorded, not read) | `true`. The chat shows "typing…" for 5 seconds. |
 | `answerCallbackQuery` | `callback_query_id`, `text`, `show_alert` | `true`. The answer is kept in the chat's `callbacks`. |
 | `sendRichMessage` | `chat_id`, `rich_message` (`{"markdown": ...}` or `{"html": ...}`), the reply parameters | The sent `Message`; its `text` is the markdown, else the HTML. |
-| `sendRichMessageDraft` | `chat_id`, `draft_id`, `rich_message` | `true`. |
+| `sendRichMessageDraft` | `chat_id`, `draft_id`, `rich_message`, `can_stop`, `keep_on_stop`, `message_thread_id` | `true`. |
 | `setChatMenuButton` | `chat_id` (optional), `menu_button` | `true`; see [mini-apps.md](mini-apps.md#the-menu-button). |
 | `getChatMenuButton` | `chat_id` (optional) | The `MenuButton` the chat shows. |
 | `deleteWebhook` | nothing | `true`. There is no webhook to delete; it is accepted so a library that calls it before polling works. |
@@ -71,7 +71,7 @@ Messages, updates, keyboards and the other objects have the shapes of the types 
 
 ## getUpdates
 
-The stand delivers two kinds of update: `message`, created by `POST /sim/message`, and `callback_query`, created by `POST /sim/callback` ([sim-api.md](sim-api.md)). Update ids start at 1 and grow by one for every update created; they are never reused, not even after `POST /sim/reset`, because a polling bot remembers the last id it confirmed and would drop anything numbered below it.
+The stand delivers three kinds of update: `message`, created by `POST /sim/message`, `callback_query`, created by `POST /sim/callback`, and `stopped_message_generation`, created by `POST /sim/draft/stop` ([sim-api.md](sim-api.md)). Update ids start at 1 and grow by one for every update created; they are never reused, not even after `POST /sim/reset`, because a polling bot remembers the last id it confirmed and would drop anything numbered below it.
 
 | Parameter | Behaviour |
 |-----------|-----------|
@@ -103,6 +103,8 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 **Callback queries.** A tap through the simulation API mints a query id `cbq-1`, `cbq-2` and so on. A query takes one answer: once answered it is forgotten, so a second answer is refused like an unknown one, and so is an answer to a query minted before a reset. The answers are listed in the chat's `callbacks` with their `text` and `show_alert`.
 
 **Rich messages and drafts (Bot API 10.1).** `sendRichMessage` stores a message whose text is the `markdown` of `rich_message`, else its `html`, and which the transcript marks as rich. `sendRichMessageDraft` keeps the latest revision of each `draft_id` in the chat (its `markdown` only) and counts the revisions. A draft is not a message: it expires 30 seconds after its last revision (`draftLifetime`), each revision renewing the lifetime, and an expired draft leaves no trace in the transcript. The calls stay in the outbox.
+
+**Stopping a draft (Bot API 10.3).** A revision with `can_stop=true` shows the person a Stop button under the draft; each revision replaces the previous one's `can_stop` and `keep_on_stop`. Pressing it (`POST /sim/draft/stop`) queues a `stopped_message_generation` update carrying the chat, the revision's `message_thread_id` when it had one, and the `draft_id`. The draft leaves the transcript at once unless its latest revision set `keep_on_stop=true`, in which case it stays until it expires. A later revision of a stopped draft is accepted: the Bot API documentation does not say what Telegram answers to one.
 
 **Typing.** `sendChatAction` makes the chat show "typing…" for 5 seconds (`typingWindow`), whatever the `action`.
 
@@ -168,7 +170,7 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 
 - Methods that are not in the [table above](#methods) answer `404` with `Not Found: method not found` (unless a fault is scheduled for them). That covers, among others, `getFile`, `forwardMessage`, `copyMessage`, `sendVideo`, `sendAudio`, `sendVoice`, `sendSticker`, `sendMediaGroup`, `editMessageCaption`, `editMessageMedia`, `setWebhook`, `getChat`, `getChatMember`, `answerInlineQuery`, `answerWebAppQuery` and every payment, sticker and chat administration method.
 - Webhooks: only `deleteWebhook` and `getWebhookInfo` exist, and the stand never calls a bot. Updates are delivered by `getUpdates` alone.
-- The person sends text only. There are no incoming photos, documents, voice messages, locations, contacts or other media, no `web_app_data` service messages from a Mini App, and no `edited_message`, `channel_post`, `inline_query`, `chosen_inline_result`, `my_chat_member`, `chat_member` or `message_reaction` updates: the stand creates `message` and `callback_query` updates only.
+- The person sends text only. There are no incoming photos, documents, voice messages, locations, contacts or other media, no `web_app_data` service messages from a Mini App, and no `edited_message`, `channel_post`, `inline_query`, `chosen_inline_result`, `my_chat_member`, `chat_member` or `message_reaction` updates: the stand creates `message`, `callback_query` and `stopped_message_generation` updates only.
 - Inline mode, payments, games, polls, stickers, forum topics and business connections are not modelled.
 - `inline_message_id`: messages are addressed by `chat_id` and `message_id` only.
 - Formatting: `parse_mode` is not parsed, so `can't parse entities` never happens on its own. Schedule a fault with `contains` to see it ([sim-api.md](sim-api.md#faults)).
