@@ -1,0 +1,84 @@
+# Publish a release when a vX.Y.Z tag is pushed: GoReleaser builds every
+# archive and checksums.txt (.goreleaser.yaml) and attaches them to a GitHub
+# release, then the action in action.yml installs that release on each
+# runner system and starts it, which is what a bot's own workflow will do.
+# The tag is also the Go module version: go install ...@vX.Y.Z and a go.mod
+# require line resolve to the same commit.
+
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Publish the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The tag is on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "$GITHUB_REF_NAME ($GITHUB_SHA) is not on main" >&2
+            exit 1
+          }
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build and publish
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  verify:
+    name: Install the release (${{ matrix.os }})
+    needs: release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up tgfake with the action
+        id: tgfake
+        uses: ./
+        with:
+          version: ${{ github.ref_name }}
+          start: "true"
+          args: --llm --llm-delay 0s
+
+      - name: The released binary serves a bot
+        env:
+          URL: ${{ steps.tgfake.outputs.url }}
+          GOT: ${{ steps.tgfake.outputs.version }}
+        run: |
+          set -euo pipefail
+          [ "$GOT" = "$GITHUB_REF_NAME" ] || { echo "installed $GOT, want $GITHUB_REF_NAME" >&2; exit 1; }
+          curl -sf "$URL/bot123:TOKEN/getMe" | grep -q '"username":"tgfake_bot"'
+          curl -sf "$URL/v1/models" | grep -q 'tgfake-demo'

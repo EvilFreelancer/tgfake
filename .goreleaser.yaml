@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+#
+# Release build of the tgfake command: one static binary per platform, an
+# archive per binary and a checksums file. scripts/install.sh and the GitHub
+# Action in action.yml download exactly these names, so a rename here is a
+# rename there. Run locally with `make snapshot`; CI runs `goreleaser release`
+# on a vX.Y.Z tag (.github/workflows/release.yaml).
+version: 2
+
+project_name: tgfake
+
+before:
+  hooks:
+    - go mod tidy -diff
+
+builds:
+  - id: tgfake
+    main: ./cmd/tgfake
+    binary: tgfake
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version=v{{ .Version }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: tgfake
+    ids: [tgfake]
+    # tgfake_0.1.0_linux_amd64.tar.gz, tgfake_0.1.0_windows_arm64.zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^Merge pull request"
+
+release:
+  github:
+    owner: EvilFreelancer
+    name: tgfake
+  draft: false
+  prerelease: auto
+  footer: |
+    Install: `curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/main/scripts/install.sh | sh -s -- {{ .Tag }}`
+    or `go install github.com/EvilFreelancer/tgfake/cmd/tgfake@{{ .Tag }}`.
