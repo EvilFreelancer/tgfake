@@ -1,10 +1,10 @@
 // Package tgfake is a stand-in for the Telegram Bot API: an HTTP server that
-// answers the methods the Telegram gateway calls, keeps the chats it is sent,
-// and hands out the updates an operator or a test injects. It speaks the wire
-// format only - urlencoded forms in, {"ok":true,"result":...} out - so any Bot
-// API client can be pointed at it; the gateway does so through
-// CODDY_TELEGRAM_API_BASE. cmd/tgfake serves it on a port with a chat page,
-// and the gateway's own tests run it in-process on httptest.
+// answers the methods a bot calls, keeps the chats it is sent, and hands out
+// the updates an operator or a test injects. It speaks the wire format only -
+// urlencoded forms, JSON or multipart in, {"ok":true,"result":...} out - so
+// any Bot API client can be pointed at it by replacing the
+// https://api.telegram.org origin with the server's. cmd/tgfake serves it on a
+// port with a chat page; a Go test runs it in-process on httptest.
 //
 // The fake is deliberately literal about the parts a bot can get wrong: update
 // ids grow across a Reset, getUpdates honours offset and long-polls, a
@@ -28,8 +28,11 @@ type Options struct {
 	// Token, when set, is the only token accepted in /bot<token>/ paths; empty
 	// accepts any.
 	Token string
-	// BotUsername is what getMe reports; the gateway matches @mentions on it.
+	// BotUsername is what getMe reports; a bot matches @mentions on it.
 	BotUsername string
+	// BotFirstName is the bot's name: what getMe reports and what the bot's
+	// own messages carry in from.first_name.
+	BotFirstName string
 	// BotID is the user id getMe reports.
 	BotID int64
 	// MaxPollWait caps how long getUpdates holds a request open, whatever
@@ -45,9 +48,14 @@ type Options struct {
 	Logf func(format string, args ...any)
 }
 
+// The bot a Server with no options plays.
 const (
-	defaultBotUsername = "coddy_fake_bot"
-	defaultBotID       = int64(7000000001)
+	DefaultBotUsername  = "tgfake_bot"
+	DefaultBotFirstName = "tgfake"
+	DefaultBotID        = int64(7000000001)
+)
+
+const (
 	defaultMaxPollWait = 30 * time.Second
 	defaultPollLimit   = 100
 )
@@ -104,10 +112,13 @@ type Server struct {
 // New returns a Server with nothing in it.
 func New(opts Options) *Server {
 	if opts.BotUsername == "" {
-		opts.BotUsername = defaultBotUsername
+		opts.BotUsername = DefaultBotUsername
+	}
+	if opts.BotFirstName == "" {
+		opts.BotFirstName = DefaultBotFirstName
 	}
 	if opts.BotID == 0 {
-		opts.BotID = defaultBotID
+		opts.BotID = DefaultBotID
 	}
 	if opts.MaxPollWait <= 0 {
 		opts.MaxPollWait = defaultMaxPollWait

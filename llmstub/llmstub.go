@@ -1,9 +1,10 @@
-// Package llmstub is a scripted model server with the OpenAI shape Coddy's
-// openai provider speaks: GET /v1/models and POST /v1/chat/completions, with
-// and without streaming. It exists so the Telegram stand of cmd/tgfake runs
-// with no key and no network: the answer to a prompt is chosen by rule, by
-// turn, or by echoing the prompt back, and streamed word by word at a chosen
-// pace so the gateway's edit and draft paths have something to do.
+// Package llmstub is a scripted model server in the shape of the OpenAI Chat
+// Completions API: GET /v1/models and POST /v1/chat/completions, with and
+// without streaming. It exists so a bot built on a language model runs on the
+// stand of cmd/tgfake with no key and no network: the answer to a prompt is
+// chosen by rule, by turn, or by echoing the prompt back, and streamed word
+// by word at a chosen pace so a bot that edits its answer as it streams has
+// something to do.
 package llmstub
 
 import (
@@ -48,12 +49,18 @@ type Server struct {
 	// ChunkWords is how many words each streamed chunk carries; at most one
 	// by default.
 	ChunkWords int
+	// StripTags names the blocks a client appends to the person's words, such
+	// as Coddy's <turn_context>: every <tag>...</tag> block of a listed tag is
+	// cut out of a user message before the prompt is matched or echoed, and a
+	// user message with nothing else in it is skipped. Empty cuts nothing.
+	StripTags []string
 
 	mu    sync.Mutex
 	calls int
 }
 
-const defaultModel = "coddy-demo"
+// DefaultModel is the model id a Server with no Model reports.
+const DefaultModel = "tgfake-demo"
 
 // Handler serves the two routes under /v1.
 func (s *Server) Handler() http.Handler {
@@ -65,7 +72,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) model() string {
 	if s.Model == "" {
-		return defaultModel
+		return DefaultModel
 	}
 	return s.Model
 }
@@ -86,12 +93,12 @@ type chatRequest struct {
 }
 
 // answersToolResult reports whether the request's newest message - past the
-// <turn_context> block Coddy appends to every request - is a tool result: the
+// blocks of tags a client appends to every request - is a tool result: the
 // model already made its call this turn and now answers what came back.
-func (r *chatRequest) answersToolResult() bool {
+func (r *chatRequest) answersToolResult(tags []string) bool {
 	for i := len(r.Messages) - 1; i >= 0; i-- {
 		m := r.Messages[i]
-		if m.Role == "user" && strings.TrimSpace(stripTurnContext(userText(m.Content))) == "" {
+		if m.Role == "user" && strings.TrimSpace(stripTags(userText(m.Content), tags)) == "" {
 			continue
 		}
 		return m.Role == "tool"
@@ -101,16 +108,16 @@ func (r *chatRequest) answersToolResult() bool {
 
 // lastUserText is the text of the newest user message that a person wrote;
 // content is a string or an array of typed parts, and only the text parts
-// count. Coddy appends its runtime state to every request as one more user
-// message, a <turn_context> block (internal/agent/turn_context.go), so the
-// newest user message is usually not the person's: those blocks are cut out
-// and a message with nothing else in it is skipped.
-func (r *chatRequest) lastUserText() string {
+// count. A client may append its own state to every request as one more user
+// message (Coddy's <turn_context> block), so the newest user message is not
+// always the person's: the blocks of tags are cut out and a message with
+// nothing else in it is skipped.
+func (r *chatRequest) lastUserText(tags []string) string {
 	for i := len(r.Messages) - 1; i >= 0; i-- {
 		if r.Messages[i].Role != "user" {
 			continue
 		}
-		if text := strings.TrimSpace(stripTurnContext(userText(r.Messages[i].Content))); text != "" {
+		if text := strings.TrimSpace(stripTags(userText(r.Messages[i].Content), tags)); text != "" {
 			return text
 		}
 	}
@@ -139,25 +146,25 @@ func userText(content json.RawMessage) string {
 	return string(content)
 }
 
-const (
-	turnContextOpen  = "<turn_context>"
-	turnContextClose = "</turn_context>"
-)
-
-// stripTurnContext removes every <turn_context>...</turn_context> block from a
-// message; an unclosed block runs to the end.
-func stripTurnContext(text string) string {
-	for {
-		start := strings.Index(text, turnContextOpen)
-		if start < 0 {
-			return text
+// stripTags removes every <tag>...</tag> block of each tag from a message; an
+// unclosed block runs to the end.
+func stripTags(text string, tags []string) string {
+	for _, tag := range tags {
+		open, closing := "<"+tag+">", "</"+tag+">"
+		for {
+			start := strings.Index(text, open)
+			if start < 0 {
+				break
+			}
+			end := strings.Index(text[start:], closing)
+			if end < 0 {
+				text = text[:start]
+				break
+			}
+			text = text[:start] + text[start+end+len(closing):]
 		}
-		end := strings.Index(text[start:], turnContextClose)
-		if end < 0 {
-			return text[:start]
-		}
-		text = text[:start] + text[start+end+len(turnContextClose):]
 	}
+	return text
 }
 
 // Answer picks the reply to a prompt and counts the call.
@@ -198,11 +205,11 @@ func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"invalid JSON body"}}`, http.StatusBadRequest)
 		return
 	}
-	answer, tool, call := s.pick(req.lastUserText())
+	answer, tool, call := s.pick(req.lastUserText(s.StripTags))
 	id := fmt.Sprintf("chatcmpl-tgfake-%d", call)
 	created := time.Now().Unix()
 	usage := map[string]any{"prompt_tokens": 1, "completion_tokens": len(strings.Fields(answer)), "total_tokens": 1 + len(strings.Fields(answer))}
-	if tool != nil && !req.answersToolResult() {
+	if tool != nil && !req.answersToolResult(s.StripTags) {
 		s.callTool(w, req.Stream, id, created, fmt.Sprintf("call_llmstub_%d", call), tool)
 		return
 	}

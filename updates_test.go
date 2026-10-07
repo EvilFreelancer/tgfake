@@ -226,26 +226,26 @@ func TestInjectMessage_ReplyToBotMessage(t *testing.T) {
 
 func TestInjectCallback(t *testing.T) {
 	s := newStand(t, Options{})
-	if _, _, err := s.fake.InjectCallback(IncomingCallback{Label: "coddy-mini"}); err == nil {
+	if _, _, err := s.fake.InjectCallback(IncomingCallback{Label: "model-b"}); err == nil {
 		t.Fatal("callback into an empty chat should fail")
 	}
 	s.fake.InjectMessage(IncomingMessage{Text: "/model"})
 	s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"},
-		"reply_markup": {`{"inline_keyboard":[[{"text":"✓ coddy-demo","callback_data":"model:stub/coddy-demo"},{"text":"coddy-mini","callback_data":"model:stub/coddy-mini"}]]}`}})
-	if _, _, err := s.fake.InjectCallback(IncomingCallback{Label: "coddy-max"}); err == nil {
+		"reply_markup": {`{"inline_keyboard":[[{"text":"✓ model-a","callback_data":"model:stub/model-a"},{"text":"model-b","callback_data":"model:stub/model-b"}]]}`}})
+	if _, _, err := s.fake.InjectCallback(IncomingCallback{Label: "model-c"}); err == nil {
 		t.Fatal("missing label should fail")
 	}
-	upd, cbq, err := s.fake.InjectCallback(IncomingCallback{Label: "✓ coddy-demo"})
+	upd, cbq, err := s.fake.InjectCallback(IncomingCallback{Label: "✓ model-a"})
 	if err != nil || cbq != "cbq-1" {
 		t.Fatalf("tap: %v %q", err, cbq)
 	}
 	_, body := s.call("getUpdates", url.Values{"offset": {itoa(upd)}, "timeout": {"0"}})
 	got := updates(t, body)
 	q := got[0]["callback_query"].(map[string]any)
-	if q["data"] != "model:stub/coddy-demo" || q["id"] != "cbq-1" || q["message"].(map[string]any)["message_id"] != float64(2) || q["from"].(map[string]any)["id"] != float64(4242) {
+	if q["data"] != "model:stub/model-a" || q["id"] != "cbq-1" || q["message"].(map[string]any)["message_id"] != float64(2) || q["from"].(map[string]any)["id"] != float64(4242) {
 		t.Fatalf("callback query: %v", q)
 	}
-	if _, _, err := s.fake.InjectCallback(IncomingCallback{MessageID: 2, Data: "model:stub/coddy-mini"}); err != nil {
+	if _, _, err := s.fake.InjectCallback(IncomingCallback{MessageID: 2, Data: "model:stub/model-b"}); err != nil {
 		t.Fatalf("explicit data: %v", err)
 	}
 }

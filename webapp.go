@@ -35,7 +35,7 @@ const (
 
 // isLoopbackHost reports whether host names this machine: localhost or a
 // loopback address. The stand lets a Mini App run there over plain http,
-// which Telegram itself never does, so a Coddy started on a port of this
+// which Telegram itself never does, so a web app started on a port of this
 // machine can be opened from the chat page.
 func isLoopbackHost(host string) bool {
 	if strings.EqualFold(host, "localhost") {

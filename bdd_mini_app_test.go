@@ -21,7 +21,7 @@ func TestFakeMiniAppFeature(t *testing.T) {
 			})
 			sc.When(`^the bot sends the person a button that opens (\S+) as a Mini App$`, func(app string) error {
 				_, body := s.callToken(token, "sendMessage", url.Values{"chat_id": {"4242"}, "text": {"This conversation in the web UI"},
-					"reply_markup": {`{"inline_keyboard":[[{"text":"Open in Coddy","web_app":{"url":"` + app + `"}}]]}`}})
+					"reply_markup": {`{"inline_keyboard":[[{"text":"Open the app","web_app":{"url":"` + app + `"}}]]}`}})
 				if body["ok"] != true {
 					return fmt.Errorf("the button was refused: %v", body)
 				}
@@ -51,7 +51,7 @@ func TestFakeMiniAppFeature(t *testing.T) {
 			})
 			sc.When(`^the bot sets its menu button to open (\S+)$`, func(app string) error {
 				_, body := s.callToken(token, "setChatMenuButton", url.Values{
-					"menu_button": {`{"type":"web_app","text":"Coddy","web_app":{"url":"` + app + `"}}`}})
+					"menu_button": {`{"type":"web_app","text":"App","web_app":{"url":"` + app + `"}}`}})
 				if body["ok"] != true {
 					return fmt.Errorf("the menu button was refused: %v", body)
 				}

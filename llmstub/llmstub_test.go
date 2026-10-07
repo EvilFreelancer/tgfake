@@ -148,30 +148,68 @@ func TestPickCountsOnce(t *testing.T) {
 	}
 }
 
-// Coddy appends its runtime state as one more user message; the person's
-// words are the newest user message that is not such a block.
-func TestLastUserTextSkipsTurnContext(t *testing.T) {
-	block := "<turn_context>\nRuntime state refreshed by Coddy for this step.\n\n## Current UTC time\n\n2026-09-17T21:31:10Z\n</turn_context>"
-	var req chatRequest
+// A client may append machine-made context to every request as one more user
+// message (Coddy's <turn_context> block). With its tag in StripTags the
+// person's words are the newest user message that is not such a block.
+func TestStripTagsAnswersThePersonNotTheAppendedBlock(t *testing.T) {
+	block := "<turn_context>\nRuntime state refreshed for this step.\n\n## Current UTC time\n\n2026-09-17T21:31:10Z\n</turn_context>"
 	body := `{"messages":[
 		{"role":"system","content":"sys"},
 		{"role":"user","content":"hello"},
 		{"role":"assistant","content":"hi"},
 		{"role":"user","content":"tell me more"},
 		{"role":"user","content":` + strconvQuote(block) + `}]}`
-	if err := json.Unmarshal([]byte(body), &req); err != nil {
+	if got := echo(t, &Server{StripTags: []string{"turn_context"}}, body); got != "You said: tell me more" {
+		t.Fatalf("echo answers the person, not the appended block: %q", got)
+	}
+}
+
+// Without StripTags nothing is cut: the newest user message is the prompt,
+// whatever it holds.
+func TestWithoutStripTagsTheNewestUserMessageIsThePrompt(t *testing.T) {
+	body := `{"messages":[{"role":"user","content":"hello"},{"role":"user","content":"<turn_context>state</turn_context>"}]}`
+	if got := echo(t, &Server{}, body); got != "You said: <turn_context>state</turn_context>" {
+		t.Fatalf("echo = %q", got)
+	}
+}
+
+func TestStripTagsCutsEveryBlockOfEveryTag(t *testing.T) {
+	tags := []string{"turn_context", "system-reminder"}
+	for in, want := range map[string]string{
+		"before <turn_context>x</turn_context> after":                           "before  after",
+		"<system-reminder>a</system-reminder>mid<turn_context>b</turn_context>": "mid",
+		"open <turn_context> never closed":                                      "open ",
+		"no blocks at all":                                                      "no blocks at all",
+		"<other>kept</other>":                                                   "<other>kept</other>",
+	} {
+		if got := stripTags(in, tags); got != want {
+			t.Errorf("stripTags(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := stripTags("<turn_context>x</turn_context>", nil); got != "<turn_context>x</turn_context>" {
+		t.Errorf("no tags cut %q", got)
+	}
+}
+
+func TestModelsListsTheDefaultModel(t *testing.T) {
+	srv := httptest.NewServer((&Server{}).Handler())
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := req.lastUserText(); got != "tell me more" {
-		t.Fatalf("lastUserText = %q", got)
+	defer func() { _ = resp.Body.Close() }()
+	var body struct {
+		Data []struct{ ID string } `json:"data"`
 	}
-	if got := stripTurnContext("before " + block + " after"); strings.TrimSpace(got) != "before  after" && got != "before  after" {
-		t.Fatalf("stripTurnContext = %q", got)
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || len(body.Data) != 1 || body.Data[0].ID != "tgfake-demo" {
+		t.Fatalf("models: %v %+v", err, body)
 	}
-	if got := stripTurnContext("open <turn_context> never closed"); got != "open " {
-		t.Fatalf("unclosed block = %q", got)
-	}
-	stub := &Server{}
+}
+
+// echo posts a blocking completion and returns the answer's text.
+func echo(t *testing.T, stub *Server, body string) string {
+	t.Helper()
 	srv := httptest.NewServer(stub.Handler())
 	defer srv.Close()
 	resp := post(t, srv.URL, body)
@@ -181,9 +219,10 @@ func TestLastUserTextSkipsTurnContext(t *testing.T) {
 			Message struct{ Content string } `json:"message"`
 		} `json:"choices"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || len(out.Choices) != 1 || out.Choices[0].Message.Content != "You said: tell me more" {
-		t.Fatalf("echo answers the person, not the runtime block: %v %+v", err, out)
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || len(out.Choices) != 1 {
+		t.Fatalf("completion: %v %+v", err, out)
 	}
+	return out.Choices[0].Message.Content
 }
 
 func strconvQuote(s string) string {
@@ -193,10 +232,10 @@ func strconvQuote(s string) string {
 
 // A rule with a tool makes the model act: the first request of a turn whose
 // prompt matches gets the tool call, and the request that carries the tool's
-// result gets the rule's answer. Coddy's <turn_context> message after the
-// result does not hide it.
+// result gets the rule's answer. A stripped block after the result does not
+// hide it.
 func TestToolRuleCallsTheToolThenAnswersItsResult(t *testing.T) {
-	stub := &Server{Rules: []Rule{{
+	stub := &Server{StripTags: []string{"turn_context"}, Rules: []Rule{{
 		Match:  "start the tests",
 		Tool:   &ToolCall{Name: "run_command", Arguments: json.RawMessage(`{"command":"make test","background":true}`)},
 		Answer: "Started them in the background.",

@@ -1,10 +1,9 @@
-// Command tgfake is the offline stand for the Telegram gateway: a fake Bot
-// API server with a chat page, and optionally a scripted model server, so
-// coddy serve can run a bot with no token, no phone and no network. See
-// docs/surfaces/gateway.md (Debugging against a fake Bot API).
+// Command tgfake serves the tgfake server - a fake Telegram Bot API with a
+// chat page and a simulation API - and optionally a scripted OpenAI-compatible
+// model, so a bot runs with no token, no phone and no network. See README.md.
 //
-//	go run ./cmd/tgfake --llm                     # fake Bot API + scripted model on :18790
-//	CODDY_TELEGRAM_API_BASE=http://127.0.0.1:18790 coddy serve --gateway --http=false
+//	tgfake --llm                                  # fake Bot API + scripted model on :18790
+//	export TELEGRAM_API=http://127.0.0.1:18790    # point the bot's Bot API origin here
 //	open http://127.0.0.1:18790/                  # the person's side of the chat
 package main
 
@@ -14,11 +13,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -27,60 +28,105 @@ import (
 	"github.com/EvilFreelancer/tgfake/llmstub"
 )
 
+// version is set at link time by the release build (-X main.version=...).
+var version = ""
+
 func main() {
-	addr := flag.String("addr", "127.0.0.1:18790", "address to listen on")
-	token := flag.String("token", "", "the only bot token accepted; empty accepts any")
-	botName := flag.String("bot-username", "coddy_fake_bot", "username getMe reports")
-	pollMax := flag.Duration("poll-max", 30*time.Second, "longest a getUpdates request is held open")
-	verbose := flag.Bool("verbose", false, "print every Bot API call")
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	switch {
+	case errors.Is(err, flag.ErrHelp):
+	case err != nil:
+		fmt.Fprintln(os.Stderr, "tgfake:", err)
+		os.Exit(1)
+	}
+}
 
-	llm := flag.Bool("llm", false, "also serve a scripted OpenAI-compatible model under /v1")
-	llmModel := flag.String("llm-model", "coddy-demo", "model id the scripted model reports")
-	llmScript := flag.String("llm-script", "", "JSON file with [{\"match\": \"...\", \"answer\": \"...\"}] rules; a rule with \"tool\": {\"name\": ..., \"arguments\": {...}} calls that tool first and answers its result")
-	llmDelay := flag.Duration("llm-delay", 50*time.Millisecond, "pause between streamed chunks")
-	llmChunk := flag.Int("llm-chunk-words", 1, "words per streamed chunk")
-	var llmAnswers stringList
-	flag.Var(&llmAnswers, "llm-answer", "a canned answer, used in turn; repeatable")
-	flag.Parse()
+// run parses args, serves the stand until ctx ends and returns nil on a clean
+// shutdown. The banner goes to stdout, flag errors and usage to stderr.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("tgfake", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	addr := fs.String("addr", "127.0.0.1:18790", "address to listen on; port 0 picks a free one")
+	token := fs.String("token", "", "the only bot token accepted; empty accepts any")
+	botUsername := fs.String("bot-username", tgfake.DefaultBotUsername, "username getMe reports")
+	botName := fs.String("bot-name", tgfake.DefaultBotFirstName, "the bot's first name, as getMe and its messages report it")
+	pollMax := fs.Duration("poll-max", 30*time.Second, "longest a getUpdates request is held open")
+	verbose := fs.Bool("verbose", false, "print every Bot API call")
+	showVersion := fs.Bool("version", false, "print the version and exit")
 
-	opts := tgfake.Options{Token: *token, BotUsername: *botName, MaxPollWait: *pollMax}
+	llm := fs.Bool("llm", false, "also serve a scripted OpenAI-compatible model under /v1")
+	llmModel := fs.String("llm-model", llmstub.DefaultModel, "model id the scripted model reports")
+	llmScript := fs.String("llm-script", "", "JSON file with [{\"match\": \"...\", \"answer\": \"...\"}] rules; a rule with \"tool\": {\"name\": ..., \"arguments\": {...}} calls that tool first and answers its result")
+	llmDelay := fs.Duration("llm-delay", 50*time.Millisecond, "pause between streamed chunks")
+	llmChunk := fs.Int("llm-chunk-words", 1, "words per streamed chunk")
+	var llmAnswers, llmStripTags stringList
+	fs.Var(&llmAnswers, "llm-answer", "a canned answer, used in turn; repeatable")
+	fs.Var(&llmStripTags, "llm-strip-tag", "a tag whose <tag>...</tag> blocks the client appends to user messages and the model ignores; repeatable")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *showVersion {
+		_, err := fmt.Fprintf(stdout, "tgfake %s\n", currentVersion())
+		return err
+	}
+
+	opts := tgfake.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax}
 	if *verbose {
-		opts.Logf = log.Printf
+		opts.Logf = log.New(stderr, "", log.LstdFlags).Printf
 	}
 	var stub *llmstub.Server
 	if *llm {
-		stub = &llmstub.Server{Model: *llmModel, Answers: llmAnswers, Delay: *llmDelay, ChunkWords: *llmChunk}
+		stub = &llmstub.Server{Model: *llmModel, Answers: llmAnswers, Delay: *llmDelay, ChunkWords: *llmChunk, StripTags: llmStripTags}
 		if *llmScript != "" {
 			rules, err := loadRules(*llmScript)
 			if err != nil {
-				fail(err)
+				return err
 			}
 			stub.Rules = rules
 		}
 	}
 
 	fake := tgfake.New(opts)
-	srv := &http.Server{Addr: *addr, Handler: newMux(fake, stub), ReadHeaderTimeout: 10 * time.Second}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
-		fail(err)
+		return err
 	}
-	origin := "http://" + ln.Addr().String()
-	printBanner(origin, *botName, stub)
+	srv := &http.Server{Handler: newMux(fake, stub), ReadHeaderTimeout: 10 * time.Second}
+	printBanner(stdout, "http://"+ln.Addr().String(), *botUsername, stub)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go func() {
-		<-ctx.Done()
-		// Release the long polls first, then let the listener drain.
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+	select {
+	case err := <-served:
 		fake.Close()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-	}()
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fail(err)
+		return err
+	case <-ctx.Done():
 	}
+	// Release the long polls first, then let the listener drain.
+	fake.Close()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// currentVersion is the release version linked in, else the module version
+// `go install ...@vX` records, else "dev".
+func currentVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
 }
 
 // newMux mounts the fake and, when given, the scripted model.
@@ -94,17 +140,17 @@ func newMux(fake *tgfake.Server, stub *llmstub.Server) http.Handler {
 	return mux
 }
 
-func printBanner(origin, botName string, stub *llmstub.Server) {
-	fmt.Printf("tgfake: fake Bot API for @%s at %s\n", botName, origin)
-	fmt.Printf("  chat page:   %s/\n", origin)
-	fmt.Printf("  point coddy: %s=%s\n", "CODDY_TELEGRAM_API_BASE", origin)
+func printBanner(w io.Writer, origin, botUsername string, stub *llmstub.Server) {
+	_, _ = fmt.Fprintf(w, "tgfake %s: fake Bot API for @%s at %s\n", currentVersion(), botUsername, origin)
+	_, _ = fmt.Fprintf(w, "  Bot API:    %s/bot<token>/<method>  (in place of https://api.telegram.org)\n", origin)
+	_, _ = fmt.Fprintf(w, "  chat page:  %s/\n", origin)
+	_, _ = fmt.Fprintf(w, "  sim API:    %s/sim/\n", origin)
 	if stub != nil {
-		fmt.Printf("  model:       %s/v1 (id %s)\n", origin, stub.Model)
-		fmt.Printf("\nconfig.yaml for an offline stand:\n\n")
-		fmt.Printf("providers:\n  - name: stub\n    type: openai\n    api_base: \"%s/v1\"\n    api_key: \"sk-tgfake\"\n", origin)
-		fmt.Printf("models:\n  - model: stub/%s\nagent:\n  model: stub/%s\n", stub.Model, stub.Model)
-		fmt.Printf("httpserver:\n  enable: false\n")
-		fmt.Printf("gateways:\n  telegram:\n    enable: true\n    token: \"123456:fake\"\n\n")
+		model := stub.Model
+		if model == "" {
+			model = llmstub.DefaultModel
+		}
+		_, _ = fmt.Fprintf(w, "  model:      %s/v1  (OpenAI-compatible, model %s, any API key)\n", origin, model)
 	}
 }
 
@@ -125,8 +171,3 @@ type stringList []string
 
 func (l *stringList) String() string     { return strings.Join(*l, ", ") }
 func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
-
-func fail(err error) {
-	fmt.Fprintln(os.Stderr, "tgfake:", err)
-	os.Exit(1)
-}

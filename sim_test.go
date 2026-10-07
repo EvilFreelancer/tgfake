@@ -146,7 +146,7 @@ func TestSim_WebAppLaunchAndMenuButtonState(t *testing.T) {
 	if status != http.StatusBadRequest || body["error"] == nil {
 		t.Fatalf("nothing to open: %d %v", status, body)
 	}
-	s.callToken("123456:SIM", "setChatMenuButton", url.Values{"menu_button": {`{"type":"web_app","text":"Coddy","web_app":{"url":"https://coddy.example.com/"}}`}})
+	s.callToken("123456:SIM", "setChatMenuButton", url.Values{"menu_button": {`{"type":"web_app","text":"App","web_app":{"url":"https://app.example.com/"}}`}})
 	_, state := s.sim("GET", "/sim/state", nil)
 	menu, _ := state["menu_button"].(map[string]any)
 	if menu["type"] != "web_app" {
@@ -164,7 +164,7 @@ func TestSim_WebAppLaunchAndMenuButtonState(t *testing.T) {
 	}
 	launchURL, _ := body["url"].(string)
 	initData, _ := body["init_data"].(string)
-	if !strings.HasPrefix(launchURL, "https://coddy.example.com/#tgWebAppData=") || initData == "" {
+	if !strings.HasPrefix(launchURL, "https://app.example.com/#tgWebAppData=") || initData == "" {
 		t.Fatalf("launch answer: %v", body)
 	}
 	vals := checkInitData(t, "123456:SIM", initData)

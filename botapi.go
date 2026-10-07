@@ -131,7 +131,7 @@ func (s *Server) me() map[string]any {
 	return map[string]any{
 		"id":                          s.opts.BotID,
 		"is_bot":                      true,
-		"first_name":                  "Coddy Fake",
+		"first_name":                  s.opts.BotFirstName,
 		"username":                    s.opts.BotUsername,
 		"can_join_groups":             true,
 		"can_read_all_group_messages": false,
@@ -543,7 +543,7 @@ func (s *Server) sendRichMessageDraft(w http.ResponseWriter, method string, para
 }
 
 func (s *Server) botUser() *User {
-	return &User{ID: s.opts.BotID, IsBot: true, FirstName: "Coddy Fake", Username: s.opts.BotUsername}
+	return &User{ID: s.opts.BotID, IsBot: true, FirstName: s.opts.BotFirstName, Username: s.opts.BotUsername}
 }
 
 // writeResult answers ok:true and files the call.

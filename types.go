@@ -1,6 +1,6 @@
 package tgfake
 
-// The wire shapes of the Bot API objects the gateway sends and reads. They
+// The wire shapes of the Bot API objects a bot sends and reads. They
 // are written here rather than borrowed from a Telegram library so that the
 // fake stays free of build tags and of the library's opinions: any client
 // that speaks the Bot API can point at it.
@@ -56,7 +56,7 @@ type MenuButton struct {
 	WebApp *WebAppInfo `json:"web_app,omitempty"`
 }
 
-// InlineKeyboardMarkup is the reply_markup the gateway attaches to its menus.
+// InlineKeyboardMarkup is the reply_markup a bot attaches to its menus.
 type InlineKeyboardMarkup struct {
 	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
 }
@@ -79,7 +79,7 @@ type Document struct {
 	FileSize     int    `json:"file_size,omitempty"`
 }
 
-// Message mirrors the subset of the Bot API Message object the gateway reads
+// Message mirrors the subset of the Bot API Message object a bot reads
 // and writes.
 type Message struct {
 	MessageID      int                   `json:"message_id"`
@@ -106,7 +106,7 @@ type CallbackQuery struct {
 }
 
 // Update is one item of a getUpdates answer. The fake produces messages and
-// callback queries, the two kinds the gateway handles.
+// callback queries, the two kinds the stand delivers.
 type Update struct {
 	UpdateID      int            `json:"update_id"`
 	Message       *Message       `json:"message,omitempty"`

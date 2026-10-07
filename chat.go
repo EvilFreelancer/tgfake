@@ -134,7 +134,7 @@ func (m *storedMessage) quoted() *Message {
 }
 
 // button finds a keyboard button by its visible text, ignoring the check
-// mark the gateway puts in front of the current choice.
+// mark a bot puts in front of the current choice.
 func (m *storedMessage) button(label string) *InlineKeyboardButton {
 	if m.msg.ReplyMarkup == nil {
 		return nil
@@ -165,7 +165,7 @@ type ChatView struct {
 
 // FindButton looks a button up by its visible text, the way a person finds
 // it: the newest message that still shows it wins, and the check mark the
-// gateway puts in front of the current choice is ignored. It returns the
+// bot puts in front of the current choice is ignored. It returns the
 // message carrying the keyboard and the button's callback_data.
 func (v ChatView) FindButton(label string) (messageID int, data string, ok bool) {
 	want := strings.TrimPrefix(strings.TrimSpace(label), "✓ ")
