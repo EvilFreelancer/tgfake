@@ -1,0 +1,58 @@
+---
+description: How the server mirrors api.telegram.org: answers, refusals with Telegram's words, state rules, adding a method
+paths:
+  - "pkg/server/**"
+  - "pkg/botapi/**"
+  - "pkg/webapp/**"
+---
+
+# Telegram fidelity
+
+The server exists so a bot meets in a test what it will meet in a chat. Every
+Bot API method behaves the way api.telegram.org does, including how it fails.
+
+## What "the same" means
+
+- **Same answers.** The envelope is `{"ok": true, "result": ...}` or
+  `{"ok": false, "error_code": N, "description": "..."}` with the HTTP status
+  equal to `error_code` (`writeResult`, `writeError` in `pkg/server/methods.go`).
+  A 429 carries `parameters.retry_after`.
+- **Same refusals, same words.** When Telegram refuses a call, the server refuses
+  it with Telegram's own description, copied from a real answer or from the Bot
+  API documentation (`Bad Request: message is not modified: ...`,
+  `Bad Request: BUTTON_DATA_INVALID`, `Bad Request: query is too old and response
+  timeout expired or query ID is invalid`). A bot that matches on the text must
+  work against both. Never invent a friendlier message.
+- **Same state rules.** Update ids only grow, across `Reset` too; `offset`
+  confirms updates and a negative one counts from the end; `allowed_updates` is
+  remembered between polls and applied when an update is created; a callback
+  query takes exactly one answer; a draft expires 30 s after its last revision;
+  `typing` shows for 5 s.
+- **Stricter only on purpose.** The one deliberate difference is a button with
+  more than one action, which Telegram reads as its first and the server refuses.
+  Any new deviation is documented in `docs/bot-api.md` with its reason.
+
+## Adding or changing a method
+
+1. Find the method in the Bot API documentation and, when possible, the answer
+   Telegram gives for each failure the bot can cause.
+2. Add the case to the switch in `serveBotAPI` (lower-cased name) and a handler
+   that reads parameters through `params` (query, form, JSON and multipart all
+   arrive there) and answers through `writeResult` / `writeError`, so the call is
+   filed in the outbox and faults apply to it.
+3. Keep chat state behind `s.mu`; a helper that expects the lock ends in
+   `Locked`. Read time through `s.now`, never `time.Now`, so tests can move it.
+4. When the person would see the effect, put it in the `ChatView` (and the text
+   form `ChatView.Text`) so the simulation API and the chat page show it.
+5. Wire types go to `pkg/botapi` with the Bot API's JSON names; stateless Mini
+   App logic goes to `pkg/webapp`.
+6. Tests: the happy path in a `features/*.feature` scenario when it is a new
+   capability, every refusal as a unit test asserting status and description.
+7. Document the method in `docs/bot-api.md` (row, refusals) and, if the person
+   can trigger it, in `docs/sim-api.md`.
+
+## Never
+
+- Accept input Telegram rejects because a bot under test happens to send it.
+- Add a dependency outside test files; the packages are standard library only.
+- Add behaviour that only one client needs as a default; make it an option.

@@ -1,0 +1,42 @@
+---
+description: Tags are module versions, release asset names are coupled across GoReleaser, the installer, the action and the docs
+paths:
+  - ".goreleaser.yaml"
+  - "scripts/**"
+  - "action.yml"
+  - ".github/**"
+  - "Makefile"
+---
+
+# Release
+
+A release is a tag `vX.Y.Z` on `main`. The tag is at once the Go module version
+(`go install ...@vX.Y.Z`, a `require` line), the name of the GitHub release
+with the binaries, and the ref of the GitHub Action (`uses:
+EvilFreelancer/tgfake@vX.Y.Z` installs that same version).
+
+## Coupled names
+
+`.goreleaser.yaml` names the archives `tgfake_<version without v>_<os>_<arch>`
+(`.tar.gz`, `.zip` on Windows) with `checksums.txt` beside them, for linux,
+darwin and windows on amd64 and arm64. `scripts/install.sh` builds the same
+names, `action.yml` calls the installer, and `docs/ci.md` documents them. A
+change to one is a change to all four, checked by the `Release path` job of
+`ci.yaml` (snapshot build, `scripts/test-install.sh`, the action from a local
+mirror) before it can reach a tag.
+
+## Cutting one
+
+1. `main` is green (the `CI` gate job).
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. `release.yaml` runs the race-detector suite, publishes with GoReleaser, then
+   installs the release with the action on Linux, macOS and Windows and talks to
+   it.
+
+## Never
+
+- Move, delete or re-push a tag: the Go module proxy has already cached it. Fix a
+  bad release with the next patch version.
+- Tag a commit that is not on `main` (`release.yaml` refuses it).
+- Publish an asset under a name the installer does not build.
+- Interpolate an action input into a `run:` script; pass it through `env:`.

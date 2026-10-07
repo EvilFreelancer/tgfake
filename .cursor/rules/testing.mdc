@@ -1,0 +1,30 @@
+---
+description: Happy paths in features/ with godog, edges in unit tests, through the wire, race-clean
+globs: **/*_test.go, features/**, examples/**
+alwaysApply: false
+---
+
+# Testing
+
+Tests are the specification of the server. A change starts with the test that
+shows it missing.
+
+- **Happy path in `features/`.** A new capability gets a scenario in a
+  `features/*.feature` file describing it working, with step definitions in a
+  `bdd_*_test.go` of the package that owns it (`Options.Paths` relative to that
+  package, `Strict: true`). The command's own story is
+  `features/command.feature`, run against `run()` in `cmd/tgfake`.
+- **Edges in unit tests.** Refusals, limits and odd input are ordinary tests
+  next to the code, asserting both the HTTP status and Telegram's description.
+- **Through the wire.** Server tests talk HTTP to a `newStand` (`httptest` plus
+  a short `MaxPollWait`) the way a bot library does - `s.call`, `s.callToken`,
+  `s.sim` - and read state back through the public view (`Chat`, `Calls`).
+- **No sleeps where a signal exists.** Wait on `WaitCall`, a channel or a
+  bounded poll; move time through `s.now` instead of sleeping past a deadline.
+- **Clean shutdown.** Close the server before its `httptest.Server`, so held
+  long polls do not stall the listener.
+- **Race-clean.** `make check` runs golangci-lint and `go test -race` over
+  everything; CI runs the same on Linux and the plain suite on macOS and
+  Windows, plus Go 1.22.
+- **Examples are tested.** `examples/echobot` is part of `go test ./...`;
+  `examples/shell/bot-e2e.sh` runs in CI against the binary the action installs.
