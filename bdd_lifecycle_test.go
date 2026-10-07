@@ -54,7 +54,7 @@ func TestFakeLifecycleFeature(t *testing.T) {
 				return nil
 			})
 		},
-		Options: &godog.Options{Format: "pretty", Paths: []string{"../../features/tgfake_lifecycle.feature"}, TestingT: t, Strict: true},
+		Options: &godog.Options{Format: "pretty", Paths: []string{"features/update_lifecycle.feature"}, TestingT: t, Strict: true},
 	}
 	if suite.Run() != 0 {
 		t.Fatal("Telegram stand lifecycle feature failed")

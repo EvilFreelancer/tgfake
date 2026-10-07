@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EvilFreelancer/coddy-agent/internal/tgfake"
-	"github.com/EvilFreelancer/coddy-agent/internal/tgfake/llmstub"
+	"github.com/EvilFreelancer/tgfake"
+	"github.com/EvilFreelancer/tgfake/llmstub"
 )
 
 func TestNewMux_ServesFakeAndModel(t *testing.T) {

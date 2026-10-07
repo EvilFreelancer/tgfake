@@ -23,9 +23,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/EvilFreelancer/coddy-agent/internal/config"
-	"github.com/EvilFreelancer/coddy-agent/internal/tgfake"
-	"github.com/EvilFreelancer/coddy-agent/internal/tgfake/llmstub"
+	"github.com/EvilFreelancer/tgfake"
+	"github.com/EvilFreelancer/tgfake/llmstub"
 )
 
 func main() {
@@ -98,7 +97,7 @@ func newMux(fake *tgfake.Server, stub *llmstub.Server) http.Handler {
 func printBanner(origin, botName string, stub *llmstub.Server) {
 	fmt.Printf("tgfake: fake Bot API for @%s at %s\n", botName, origin)
 	fmt.Printf("  chat page:   %s/\n", origin)
-	fmt.Printf("  point coddy: %s=%s\n", config.TelegramAPIBaseEnv, origin)
+	fmt.Printf("  point coddy: %s=%s\n", "CODDY_TELEGRAM_API_BASE", origin)
 	if stub != nil {
 		fmt.Printf("  model:       %s/v1 (id %s)\n", origin, stub.Model)
 		fmt.Printf("\nconfig.yaml for an offline stand:\n\n")
