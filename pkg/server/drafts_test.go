@@ -103,6 +103,13 @@ func TestDraftStop_KeepOnStopKeepsThePreview(t *testing.T) {
 	if len(drafts) != 1 || drafts[0].DraftID != 3 {
 		t.Fatalf("keep_on_stop must leave the preview in the chat: %+v", drafts)
 	}
+
+	if _, err := s.fake.StopDraft(DraftStop{DraftID: 3}); err == nil {
+		t.Fatal("the kept preview still has a Stop button")
+	}
+	if n := s.fake.PendingUpdates(); n != 1 {
+		t.Fatalf("a kept preview delivered %d stops, want 1", n)
+	}
 }
 
 func TestDraftStop_Refusals(t *testing.T) {

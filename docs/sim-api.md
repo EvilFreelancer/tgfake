@@ -111,7 +111,7 @@ curl -s -X POST $O/sim/callback -d '{"label": "Yes"}'
 
 ## POST /sim/draft/stop
 
-The person presses the Stop button the bot put under a draft by streaming it with `can_stop=true`. The stand queues a `stopped_message_generation` update with the chat, the draft's `message_thread_id` when it had one, and its `draft_id`, provided the bot's `allowed_updates` subscription includes that kind at that moment ([bot-api.md](bot-api.md#getupdates)). The draft leaves the chat unless its latest revision set `keep_on_stop=true`.
+The person presses the Stop button the bot put under a draft by streaming it with `can_stop=true`. The stand queues a `stopped_message_generation` update with the chat, the draft's `message_thread_id` when it had one, and its `draft_id`, provided the bot's `allowed_updates` subscription includes that kind at that moment ([bot-api.md](bot-api.md#getupdates)). The draft leaves the chat unless its latest revision set `keep_on_stop=true`; then it stays without the Stop button.
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|

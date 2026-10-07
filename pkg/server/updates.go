@@ -204,7 +204,9 @@ func (s *Server) StopDraft(in DraftStop) (updateID int, err error) {
 	}
 
 	chat := s.chats[in.ChatID]
-	if !target.keepOnStop {
+	if target.keepOnStop {
+		target.canStop = false
+	} else {
 		delete(chat.drafts, target.id)
 	}
 	return s.pushUpdateLocked(botapi.Update{StoppedMessageGeneration: &botapi.MessageGenerationStopped{
