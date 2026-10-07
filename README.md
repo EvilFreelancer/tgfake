@@ -50,7 +50,7 @@ go install github.com/EvilFreelancer/tgfake/cmd/tgfake@latest
 In GitHub Actions, the [action](docs/ci.md) installs it and can start it:
 
 ```yaml
-- uses: EvilFreelancer/tgfake@v0.1.0   # installs the v0.1.0 binary
+- uses: EvilFreelancer/tgfake@v1.0.0   # installs the v1.0.0 binary
   with:
     start: "true"
     args: --llm
@@ -65,7 +65,7 @@ tgfake --llm
 ```
 
 ```text
-tgfake v0.1.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
+tgfake v1.0.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
   Bot API:    http://127.0.0.1:18790/bot<token>/<method>  (in place of https://api.telegram.org)
   chat page:  http://127.0.0.1:18790/
   sim API:    http://127.0.0.1:18790/sim/

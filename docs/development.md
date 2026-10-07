@@ -50,7 +50,7 @@ The release asset names are spelled the same way in `.goreleaser.yaml`, `scripts
 | `make install-test` | `scripts/test-install.sh dist`: installs the host's archive from `dist/` through a local mirror and checks the version it reports, that a tampered checksum stops the install and that `latest` is refused with a mirror. Run `make snapshot` first. |
 | `make clean` | Removes `build/`, `dist/` and `coverage.out`. |
 
-`GORELEASER` names the GoReleaser binary, and `VERSION` can be set on the command line, for example `make build VERSION=v0.1.0`.
+`GORELEASER` names the GoReleaser binary, and `VERSION` can be set on the command line, for example `make build VERSION=v1.0.0`.
 
 ## Tests
 
@@ -93,13 +93,13 @@ A release is a tag `vX.Y.Z` on `main`. Make sure `main` is green, then tag the c
 ```bash
 git switch main
 git pull --ff-only
-git tag v0.1.1
-git push origin v0.1.1
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 Pushing the tag starts [`release.yaml`](../.github/workflows/release.yaml):
 
-1. **Publish the release.** The job refuses a tag whose commit is not on `main`, runs the tests under the race detector and runs `goreleaser release --clean`. GoReleaser checks that `go mod tidy` would change nothing, builds the binaries for Linux, macOS and Windows on amd64 and arm64 with the tag linked in, packs the archives and `checksums.txt`, and publishes them on a GitHub release with notes built from the commit messages (`docs:`, `test:` and `chore:` commits and merge commits are left out) and the install commands. A tag with a pre-release suffix, such as `v0.2.0-rc.1`, is published as a pre-release.
+1. **Publish the release.** The job refuses a tag whose commit is not on `main`, runs the tests under the race detector and runs `goreleaser release --clean`. GoReleaser checks that `go mod tidy` would change nothing, builds the binaries for Linux, macOS and Windows on amd64 and arm64 with the tag linked in, packs the archives and `checksums.txt`, and publishes them on a GitHub release with notes built from the commit messages (`docs:`, `test:` and `chore:` commits and merge commits are left out) and the install commands. A tag with a pre-release suffix, such as `v1.1.0-rc.1`, is published as a pre-release.
 2. **Install the release.** On Ubuntu, macOS and Windows runners, the action in `action.yml` installs the release just published, starts it with `--llm`, and the job checks that the binary reports the tag and that `getMe` and `/v1/models` answer. This is what a bot's own workflow does next.
 
 To check a release before tagging it, run `make release-check`, `make snapshot` and `make install-test` locally.

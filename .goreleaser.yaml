@@ -30,7 +30,7 @@ builds:
 archives:
   - id: tgfake
     ids: [tgfake]
-    # tgfake_0.1.0_linux_amd64.tar.gz, tgfake_0.1.0_windows_arm64.zip
+    # tgfake_1.0.0_linux_amd64.tar.gz, tgfake_1.0.0_windows_arm64.zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:

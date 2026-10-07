@@ -69,7 +69,7 @@ These flags configure the model described in [scripted-model.md](scripted-model.
 Once the listener is bound the command prints a banner to stdout:
 
 ```text
-tgfake v0.1.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
+tgfake v1.0.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
   Bot API:    http://127.0.0.1:18790/bot<token>/<method>  (in place of https://api.telegram.org)
   chat page:  http://127.0.0.1:18790/
   sim API:    http://127.0.0.1:18790/sim/
@@ -98,8 +98,8 @@ An address with no host or with `0.0.0.0`, such as `--addr :18790`, listens on e
 
 `--version` prints `tgfake <version>` to stdout and exits with status 0. The version is, in this order:
 
-1. the value linked into the binary with `-ldflags "-X main.version=..."`: release archives carry the tag, for example `v0.1.0`, and `make build` links the output of `git describe --tags --always --dirty`;
-2. the module version Go recorded in the binary: `go install github.com/EvilFreelancer/tgfake/cmd/tgfake@v0.1.0` records `v0.1.0`, and a `go build` inside a git checkout records a pseudo-version with recent Go toolchains;
+1. the value linked into the binary with `-ldflags "-X main.version=..."`: release archives carry the tag, for example `v1.0.0`, and `make build` links the output of `git describe --tags --always --dirty`;
+2. the module version Go recorded in the binary: `go install github.com/EvilFreelancer/tgfake/cmd/tgfake@v1.0.0` records `v1.0.0`, and a `go build` inside a git checkout records a pseudo-version with recent Go toolchains;
 3. `dev`, which is what `go run ./cmd/tgfake` reports.
 
 ## Stopping

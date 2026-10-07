@@ -3,7 +3,7 @@
 #
 #   curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/main/scripts/install.sh | sh -s -- [-b DIR] [VERSION]
 #
-# VERSION is a release tag such as v0.1.0, or "latest" (the default). The
+# VERSION is a release tag such as v1.0.0, or "latest" (the default). The
 # binary lands in DIR (default ./bin), its archive checked against the
 # release's checksums.txt first, and the last line printed is its path.
 #
@@ -23,7 +23,7 @@ VERSION="latest"
 usage() {
   cat >&2 <<'EOF'
 usage: install.sh [-b DIR] [VERSION]
-  VERSION  a release tag such as v0.1.0, or latest (the default)
+  VERSION  a release tag such as v1.0.0, or latest (the default)
   -b DIR   where the binary goes (default ./bin)
 EOF
   exit "${1:-2}"

@@ -7,7 +7,7 @@ branding:
 
 inputs:
   version:
-    description: Release to install, a tag such as v0.1.0, or latest. Empty means the tag the action itself was used at (uses EvilFreelancer/tgfake@v0.1.0 installs v0.1.0), else latest.
+    description: Release to install, a tag such as v1.0.0, or latest. Empty means the tag the action itself was used at (uses EvilFreelancer/tgfake@v1.0.0 installs v1.0.0), else latest.
     required: false
     default: ""
   install-dir:
@@ -65,7 +65,7 @@ runs:
         if [ -z "$version" ]; then
           # The ref the action was used at: github.action_ref, which some
           # runners leave empty in a composite action, else the last element
-          # of its checkout path (.../_actions/EvilFreelancer/tgfake/v0.1.0).
+          # of its checkout path (.../_actions/EvilFreelancer/tgfake/v1.0.0).
           ref="${ACTION_REF:-$(basename "$GITHUB_ACTION_PATH")}"
           case "$ref" in
             v[0-9]*.*) version="$ref" ;;

@@ -12,7 +12,7 @@ Every release `vX.Y.Z` on [GitHub](https://github.com/EvilFreelancer/tgfake/rele
 | `tgfake_<X.Y.Z>_windows_<arch>.zip` | The same with `tgfake.exe`, for `amd64` or `arm64`. |
 | `checksums.txt` | The SHA-256 of every archive. |
 
-The version in an asset name has no leading `v`: release `v0.1.0` carries `tgfake_0.1.0_linux_amd64.tar.gz`. The binaries are built without cgo, so they need no system library, and they report the tag with `--version` (`tgfake v0.1.0`).
+The version in an asset name has no leading `v`: release `v1.0.0` carries `tgfake_1.0.0_linux_amd64.tar.gz`. The binaries are built without cgo, so they need no system library, and they report the tag with `--version` (`tgfake v1.0.0`).
 
 ## GitHub Actions
 
@@ -22,7 +22,7 @@ The repository is a composite action, `EvilFreelancer/tgfake`. It installs a rel
 
 | Input | Default | Meaning |
 |-------|---------|---------|
-| `version` | `""` | The release to install: a tag such as `v0.1.0`, or `latest`. Empty means the tag the action itself was used at, so `uses: EvilFreelancer/tgfake@v0.1.0` installs v0.1.0; when that ref is not a release tag, `latest`. |
+| `version` | `""` | The release to install: a tag such as `v1.0.0`, or `latest`. Empty means the tag the action itself was used at, so `uses: EvilFreelancer/tgfake@v1.0.0` installs v1.0.0; when that ref is not a release tag, `latest`. |
 | `install-dir` | `""` | Where the binary goes. Empty means `$RUNNER_TEMP/tgfake`. The directory is added to `PATH` for the following steps. |
 | `start` | `"false"` | `"true"` starts the server in the background and waits until it answers. |
 | `addr` | `127.0.0.1:18790` | The address the started server listens on. Port 0 picks a free one; the `url` output is read from the banner, so it names the port really taken, with a wildcard address (`:18790`, `0.0.0.0`) reached through `127.0.0.1`. |
@@ -34,7 +34,7 @@ The repository is a composite action, `EvilFreelancer/tgfake`. It installs a rel
 | Output | Meaning |
 |--------|---------|
 | `path` | The path of the installed binary. |
-| `version` | The version the installed binary reports, such as `v0.1.0`. |
+| `version` | The version the installed binary reports, such as `v1.0.0`. |
 | `url` | The origin of the started server, such as `http://127.0.0.1:18790`; empty unless `start` is `"true"`. |
 | `log` | The file the started server writes its stdout and stderr to, `$RUNNER_TEMP/tgfake.log`; empty unless `start` is `"true"`. |
 | `pid` | The process id of the started server, for a step that wants to stop it with `kill`; empty unless `start` is `"true"`. |
@@ -46,22 +46,22 @@ With `start: "true"` the action runs `tgfake --addr <addr> <args>` in the backgr
 Pin the action to a release tag and leave `version` out:
 
 ```yaml
-- uses: EvilFreelancer/tgfake@v0.1.0
+- uses: EvilFreelancer/tgfake@v1.0.0
 ```
 
-The action then installs the binary of that same release, and its install script is the one of that release too, so one tag in the workflow decides everything. The action takes the ref from `github.action_ref`, and when a runner leaves that empty, from the last element of the path the action was checked out to. A ref counts as a release when it is `v` followed by a digit and contains a dot, as `v0.1.0` and `v0.2.0-rc.1` do.
+The action then installs the binary of that same release, and its install script is the one of that release too, so one tag in the workflow decides everything. The action takes the ref from `github.action_ref`, and when a runner leaves that empty, from the last element of the path the action was checked out to. A ref counts as a release when it is `v` followed by a digit and contains a dot, as `v1.0.0` and `v1.1.0-rc.1` do.
 
 `version` is for overriding that choice. It matters when the action is pinned by something that does not name a release, such as a commit SHA, a branch or a tag like `v0`: the action would install `latest`, which changes under the workflow. Name the release explicitly then:
 
 ```yaml
-- uses: EvilFreelancer/tgfake@<commit sha of v0.1.0>
+- uses: EvilFreelancer/tgfake@<commit sha of v1.0.0>
   with:
-    version: v0.1.0
+    version: v1.0.0
 ```
 
 ### A complete job
 
-The job below installs v0.1.0, starts it with the scripted model, starts the bot under test pointed at it, and runs the checks of `examples/shell/bot-e2e.sh`: a message is echoed, a tap on a button edits the message, and a flood-control fault is what the bot sees. The checks are written for the echo bot of [`examples/echobot`](../examples/echobot); replace `bot.py` and the checks with your own. `--poll-max 1s` matters: the first check waits for the bot's first `getUpdates` in the outbox, and a poll is recorded only when it is answered, which with the default would be 30 seconds later.
+The job below installs v1.0.0, starts it with the scripted model, starts the bot under test pointed at it, and runs the checks of `examples/shell/bot-e2e.sh`: a message is echoed, a tap on a button edits the message, and a flood-control fault is what the bot sees. The checks are written for the echo bot of [`examples/echobot`](../examples/echobot); replace `bot.py` and the checks with your own. `--poll-max 1s` matters: the first check waits for the bot's first `getUpdates` in the outbox, and a poll is recorded only when it is answered, which with the default would be 30 seconds later.
 
 ```yaml
 name: Bot end-to-end
@@ -78,7 +78,7 @@ jobs:
 
       - name: Start tgfake
         id: tgfake
-        uses: EvilFreelancer/tgfake@v0.1.0
+        uses: EvilFreelancer/tgfake@v1.0.0
         with:
           start: "true"
           args: --llm --llm-delay 0s --poll-max 1s
@@ -139,7 +139,7 @@ To run `bot-e2e.sh` itself, or a copy of it in your repository, install without 
 ```yaml
       - name: Install tgfake
         id: tgfake
-        uses: EvilFreelancer/tgfake@v0.1.0
+        uses: EvilFreelancer/tgfake@v1.0.0
 
       - name: End-to-end test
         env:
@@ -153,7 +153,7 @@ To run `bot-e2e.sh` itself, or a copy of it in your repository, install without 
 `scripts/install.sh` installs a release on any machine with a POSIX shell, which makes it the way in for GitLab CI, Jenkins, Buildkite, a developer's laptop and anything else:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/v0.1.0/scripts/install.sh | sh -s -- -b ./bin v0.1.0
+curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/v1.0.0/scripts/install.sh | sh -s -- -b ./bin v1.0.0
 ```
 
 ```text
@@ -162,7 +162,7 @@ usage: install.sh [-b DIR] [VERSION]
 
 | Argument | Default | Meaning |
 |----------|---------|---------|
-| `VERSION` | `latest` | A release tag such as `v0.1.0`; a version without its `v` gets one. `latest` asks GitHub where `/releases/latest` redirects, which costs no API rate limit. |
+| `VERSION` | `latest` | A release tag such as `v1.0.0`; a version without its `v` gets one. `latest` asks GitHub where `/releases/latest` redirects, which costs no API rate limit. |
 | `-b DIR` | `./bin` | Where the binary goes; the directory is created. |
 | `-h`, `--help` | | Print the usage and exit 0. An unknown option prints it and exits 2. |
 
@@ -178,7 +178,7 @@ The script downloads the archive of the platform and `checksums.txt`, and checks
 Progress goes to stderr, prefixed `tgfake install:`. The last line on stdout is the path of the installed binary, so a script can capture it:
 
 ```bash
-bin="$(curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/v0.1.0/scripts/install.sh | sh -s -- -b "$HOME/.local/bin" v0.1.0 | tail -n 1)"
+bin="$(curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/v1.0.0/scripts/install.sh | sh -s -- -b "$HOME/.local/bin" v1.0.0 | tail -n 1)"
 "$bin" --version
 ```
 
@@ -192,7 +192,7 @@ A job that installs a pinned release, then runs a copy of `examples/shell/bot-e2
 bot-e2e:
   image: python:3.12
   variables:
-    TGFAKE_VERSION: v0.1.0
+    TGFAKE_VERSION: v1.0.0
   before_script:
     - curl -sSfL -o install.sh "https://raw.githubusercontent.com/EvilFreelancer/tgfake/${TGFAKE_VERSION}/scripts/install.sh"
     - sh install.sh -b "$CI_PROJECT_DIR/bin" "$TGFAKE_VERSION"
@@ -214,7 +214,7 @@ for _ in $(seq 1 100); do curl -sf -o /dev/null http://127.0.0.1:18790/sim/state
 Where Go 1.22 or newer is at hand, the command can be built from the module instead of downloaded:
 
 ```bash
-go install github.com/EvilFreelancer/tgfake/cmd/tgfake@v0.1.0
+go install github.com/EvilFreelancer/tgfake/cmd/tgfake@v1.0.0
 ```
 
 The binary lands in `$(go env GOPATH)/bin` (or `GOBIN`) and reports the module version it was built at. A Go bot does not need the binary at all: its tests can run the stand in-process ([go.md](go.md)).
@@ -225,7 +225,7 @@ No container image is published yet. The release binaries are static, so one run
 
 ```dockerfile
 FROM alpine:3.20
-ARG TGFAKE_VERSION=v0.1.0
+ARG TGFAKE_VERSION=v1.0.0
 RUN apk add --no-cache curl \
  && curl -sSfL "https://raw.githubusercontent.com/EvilFreelancer/tgfake/${TGFAKE_VERSION}/scripts/install.sh" \
     | sh -s -- -b /usr/local/bin "${TGFAKE_VERSION}" \

@@ -26,9 +26,12 @@ projects' scripts and CI. Both are a contract versioned by the module's tags.
 
 ## Changing it
 
-- While the module is v0, a breaking change is allowed in a minor release
-  (v0.X.0) and must say so in its commit message (`feat!:` or a `BREAKING
-  CHANGE:` footer) so the release notes carry it. A patch release never breaks.
+- Releases follow semantic versioning from v1.0.0 on. A patch release (vX.Y.Z+1)
+  fixes behaviour, a minor release (vX.Y+1.0) only adds, and nothing in v1 breaks
+  a caller: a breaking change is v2, which for a Go module means the module path
+  `github.com/EvilFreelancer/tgfake/v2`, so it is a decision for the owner, not a
+  side effect of a change. Mark one in its commit message (`feat!:` or a
+  `BREAKING CHANGE:` footer) so the release notes carry it.
 - Prefer adding over changing: a new option field with a zero value that keeps
   the old behaviour, a new flag, a new route.
 - Removing or renaming an exported identifier, a flag, a JSON field or a route is
