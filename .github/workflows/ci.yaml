@@ -56,9 +56,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # golangci-lint v2.12.2 is built with Go 1.26 and panics on a newer
+      # standard library, so the two move together.
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: "1.26.x"
           cache: true
 
       - name: golangci-lint
