@@ -73,11 +73,10 @@ jobs:
         run: go mod tidy -diff
 
   # The release as it would be published, without publishing it: every
-  # archive is built, scripts/install.sh installs the host's one from a local
-  # mirror, and the action in action.yml installs and starts it the way a
-  # bot's own workflow would.
-  release-path:
-    name: Release path
+  # archive is built once here, and the install job below installs it on each
+  # runner system the way a bot's own workflow would, before any tag exists.
+  snapshot:
+    name: Release snapshot
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,6 +95,35 @@ jobs:
           version: "~> v2"
           args: release --snapshot --clean
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot
+          path: |
+            dist/tgfake_*.tar.gz
+            dist/tgfake_*.zip
+            dist/checksums.txt
+            dist/metadata.json
+          retention-days: 3
+
+  # scripts/install.sh installs the host's archive from a local mirror of the
+  # snapshot, and the action in action.yml installs and starts it, on Linux,
+  # macOS and Windows: the paths a published release takes, proven first.
+  install:
+    name: Install (${{ matrix.os }})
+    needs: snapshot
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: snapshot
+          path: dist
+
       - name: Install from a local mirror of the archives
         run: sh scripts/test-install.sh dist
 
@@ -103,10 +131,14 @@ jobs:
         id: mirror
         run: |
           version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' dist/metadata.json | head -n 1)"
-          mkdir -p "$RUNNER_TEMP/mirror/v$version"
-          cp dist/tgfake_*.tar.gz dist/tgfake_*.zip dist/checksums.txt "$RUNNER_TEMP/mirror/v$version/"
-          nohup python3 -m http.server 18799 --bind 127.0.0.1 --directory "$RUNNER_TEMP/mirror" > "$RUNNER_TEMP/mirror.log" 2>&1 &
-          for _ in $(seq 1 50); do curl -sf -o /dev/null "http://127.0.0.1:18799/v$version/checksums.txt" && break; sleep 0.1; done
+          mirror="$RUNNER_TEMP/mirror"
+          mkdir -p "$mirror/v$version"
+          cp dist/tgfake_*.tar.gz dist/tgfake_*.zip dist/checksums.txt "$mirror/v$version/"
+          py="$(command -v python3 || command -v python)"
+          if command -v cygpath > /dev/null 2>&1; then mirror="$(cygpath -w "$mirror")"; fi
+          nohup "$py" -m http.server 18799 --bind 127.0.0.1 --directory "$mirror" > "$RUNNER_TEMP/mirror.log" 2>&1 &
+          for _ in $(seq 1 50); do curl -sf -o /dev/null "http://127.0.0.1:18799/v$version/checksums.txt" && break; sleep 0.2; done
+          curl -sf -o /dev/null "http://127.0.0.1:18799/v$version/checksums.txt" || { cat "$RUNNER_TEMP/mirror.log" >&2; exit 1; }
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
       - name: Set up tgfake with the action
@@ -132,10 +164,41 @@ jobs:
           curl -sf "$URL/bot123:TOKEN/getUpdates?timeout=0" | grep -q '"text":"hello"'
           curl -sf "$URL/v1/models" | grep -q 'tgfake-demo'
 
+      - name: A second stand on a free port
+        id: free
+        uses: ./
+        with:
+          version: ${{ steps.mirror.outputs.tag }}
+          download-base: http://127.0.0.1:18799
+          start: "true"
+          addr: 127.0.0.1:0
+
+      - name: The free port is the one the action reports
+        env:
+          URL: ${{ steps.free.outputs.url }}
+        run: |
+          set -euo pipefail
+          case "$URL" in http://127.0.0.1:18790) echo "the second stand reports the first one's port" >&2; exit 1 ;; esac
+          curl -sf "$URL/bot123:TOKEN/getMe" | grep -q '"is_bot":true'
+
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Linux'
+        with:
+          go-version: stable
+          cache: true
+
+      # The any-language integration test of examples/shell, against the
+      # installed binary and the example bot.
+      - name: The example bot passes bot-e2e.sh
+        if: runner.os == 'Linux'
+        env:
+          TGFAKE_BIN: ${{ steps.tgfake.outputs.path }}
+        run: sh examples/shell/bot-e2e.sh
+
   ci:
     name: CI
     if: always()
-    needs: [test, lint, release-path]
+    needs: [test, lint, snapshot, install]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed

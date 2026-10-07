@@ -20,7 +20,7 @@ in-process. `README.md` is the landing page; `docs/` is the reference.
 | `features/` | Gherkin specs of the happy paths, run by godog harnesses in the owning package (`pkg/server/bdd_*_test.go`, `cmd/tgfake/bdd_command_test.go`). |
 | `examples/echobot`, `examples/shell` | A standard-library bot with its in-process tests, and an any-language integration test driving the binary and a bot process with curl. |
 | `scripts/install.sh`, `action.yml` | The release installer (checksum-verified) and the composite GitHub Action built on it. `scripts/test-install.sh` checks the installer against a snapshot. |
-| `.goreleaser.yaml`, `.github/workflows/` | Release archives and checksums; `ci.yaml` (test matrix, lint, release path, gate job `CI`) and `release.yaml` (publish on a `vX.Y.Z` tag, then install it on three systems). |
+| `.goreleaser.yaml`, `.github/workflows/` | Release archives and checksums; `ci.yaml` (test matrix, lint, a release snapshot installed on three systems with `bot-e2e.sh` on Linux, gate job `CI`) and `release.yaml` (publish on a `vX.Y.Z` tag, then install it on three systems). |
 
 ## Commands
 

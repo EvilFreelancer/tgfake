@@ -19,7 +19,7 @@ inputs:
     required: false
     default: "false"
   addr:
-    description: Address the started server listens on.
+    description: Address the started server listens on; port 0 picks a free one, and the url output names it.
     required: false
     default: 127.0.0.1:18790
   args:
@@ -44,6 +44,9 @@ outputs:
   log:
     description: File the started server writes its output to; empty unless start is true.
     value: ${{ steps.start.outputs.log }}
+  pid:
+    description: Process id of the started server, to stop it with kill; empty unless start is true.
+    value: ${{ steps.start.outputs.pid }}
 
 runs:
   using: composite
@@ -89,16 +92,26 @@ runs:
         # Word splitting of INPUT_ARGS is the point: it carries several flags.
         # shellcheck disable=SC2086
         nohup "$TGFAKE_BIN" --addr "$INPUT_ADDR" $INPUT_ARGS > "$log" 2>&1 &
-        url="http://$INPUT_ADDR"
+        pid=$!
+        # The origin is the one the banner names, so port 0 and a wildcard
+        # address work too; a wildcard is reached through the loopback.
         for _ in $(seq 1 100); do
-          if curl -sf -o /dev/null "$url/sim/state"; then
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "tgfake exited before it served:" >&2
+            cat "$log" >&2
+            exit 1
+          fi
+          url="$(sed -n 's/^tgfake .* at \(http:[^ ]*\)$/\1/p' "$log" | head -n 1 | tr -d '\r')"
+          url="$(printf '%s' "$url" | sed 's#//0\.0\.0\.0:#//127.0.0.1:#; s#//\[::\]:#//127.0.0.1:#')"
+          if [ -n "$url" ] && curl -sf -o /dev/null "$url/sim/state"; then
             echo "url=$url" >> "$GITHUB_OUTPUT"
             echo "log=$log" >> "$GITHUB_OUTPUT"
-            echo "tgfake is serving at $url (log: $log)"
+            echo "pid=$pid" >> "$GITHUB_OUTPUT"
+            echo "tgfake is serving at $url (pid $pid, log: $log)"
             exit 0
           fi
           sleep 0.2
         done
-        echo "tgfake did not answer at $url within 20 s:" >&2
+        echo "tgfake did not answer within 20 s:" >&2
         cat "$log" >&2
         exit 1

@@ -82,7 +82,8 @@ Without `TGFAKE_BIN` and with no `tgfake` on the `PATH` it builds the command fr
 |-----|----------------|
 | Test | `go vet` and the tests on Ubuntu, macOS and Windows with the stable Go, and on Ubuntu with Go 1.22. On Linux the tests run under the race detector. |
 | Lint | golangci-lint v2.12.2, on the Go 1.26 toolchain it is built with, and `go mod tidy -diff`, which fails when `go.mod` or `go.sum` is not tidy. |
-| Release path | The release without publishing it: GoReleaser builds every archive as a snapshot, `scripts/test-install.sh` installs from a local mirror of them, and the action in `action.yml` installs the snapshot from that mirror and starts it with `--llm`, after which a bot's first calls (`getMe`, a message through `/sim/message`, `getUpdates`, `/v1/models`) are made against it and the installed version is compared with the snapshot's. |
+| Release snapshot | The release without publishing it: GoReleaser builds every archive as a snapshot and keeps them as a workflow artifact. |
+| Install | On Ubuntu, macOS and Windows: `scripts/test-install.sh` installs the host's archive from a local mirror of the snapshot (and, outside Windows, again over a running binary), then the action in `action.yml` installs the snapshot from that mirror and starts it with `--llm`, a bot's first calls (`getMe`, a message through `/sim/message`, `getUpdates`, `/v1/models`) are made against it and the installed version is compared with the snapshot's; a second start on port 0 must report its own address. On Linux, `examples/shell/bot-e2e.sh` runs the example bot against the installed binary. |
 | CI | The gate. It runs after the others whatever their result and passes only when every one of them succeeded; it is the check a branch protection rule requires. |
 
 ## Cutting a release

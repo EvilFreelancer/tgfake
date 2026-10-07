@@ -25,7 +25,7 @@ The repository is a composite action, `EvilFreelancer/tgfake`. It installs a rel
 | `version` | `""` | The release to install: a tag such as `v0.1.0`, or `latest`. Empty means the tag the action itself was used at, so `uses: EvilFreelancer/tgfake@v0.1.0` installs v0.1.0; when that ref is not a release tag, `latest`. |
 | `install-dir` | `""` | Where the binary goes. Empty means `$RUNNER_TEMP/tgfake`. The directory is added to `PATH` for the following steps. |
 | `start` | `"false"` | `"true"` starts the server in the background and waits until it answers. |
-| `addr` | `127.0.0.1:18790` | The address the started server listens on. Give a fixed port: the `url` output is built from this value. |
+| `addr` | `127.0.0.1:18790` | The address the started server listens on. Port 0 picks a free one; the `url` output is read from the banner, so it names the port really taken, with a wildcard address (`:18790`, `0.0.0.0`) reached through `127.0.0.1`. |
 | `args` | `""` | More arguments for the started server, split on whitespace, for example `--llm --llm-script rules.json`. |
 | `download-base` | `""` | Fetch `<tag>/<asset>` from this base instead of the GitHub release downloads: a mirror, or a snapshot build under test. It does not work with `latest`, so the version has to be a tag. |
 
@@ -37,8 +37,9 @@ The repository is a composite action, `EvilFreelancer/tgfake`. It installs a rel
 | `version` | The version the installed binary reports, such as `v0.1.0`. |
 | `url` | The origin of the started server, such as `http://127.0.0.1:18790`; empty unless `start` is `"true"`. |
 | `log` | The file the started server writes its stdout and stderr to, `$RUNNER_TEMP/tgfake.log`; empty unless `start` is `"true"`. |
+| `pid` | The process id of the started server, for a step that wants to stop it with `kill`; empty unless `start` is `"true"`. |
 
-With `start: "true"` the action runs `tgfake --addr <addr> <args>` in the background and polls `GET /sim/state` every 0.2 s. If the server does not answer within 20 seconds, the step prints the log and fails. Once started, the server runs until the job ends.
+With `start: "true"` the action runs `tgfake --addr <addr> <args>` in the background, reads the origin from the banner and polls `GET /sim/state` every 0.2 s. If the process exits first (a busy port, a bad flag), or the server does not answer within 20 seconds, the step prints the log and fails. Once started, the server runs until the job ends.
 
 ### Pinning a version
 
@@ -115,14 +116,14 @@ jobs:
           wait_for chat_has "bot: Pong." || { echo "the tap did not edit the message" >&2; exit 1; }
           sent_at_least answerCallbackQuery 1 || { echo "the tap was not answered" >&2; exit 1; }
 
+          # The next sendMessage is refused as a flood: the bot must have tried
+          # it and been told so; retrying after retry_after is its own choice.
+          n="$(curl -sf "$O/sim/outbox/count?method=sendMessage" | tr -dc '0-9')"
           curl -sf -X POST "$O/sim/fault" \
             -d '{"method": "sendMessage", "code": 429, "retry_after": 1, "times": 1}' > /dev/null
           say "under flood control"
-          sleep 1
-          if chat_has "You said: under flood control"; then
-            echo "a refused sendMessage still reached the chat" >&2
-            exit 1
-          fi
+          wait_for sent_at_least sendMessage $((n + 1)) || { echo "the bot did not try to answer under flood control" >&2; exit 1; }
+          curl -sf "$O/sim/outbox?method=sendMessage" | grep -q '"status":429' || { echo "the bot's sendMessage was not refused" >&2; exit 1; }
 
       - name: Show the chat and the logs
         if: failure()

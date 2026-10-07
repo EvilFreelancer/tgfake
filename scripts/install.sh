@@ -85,6 +85,16 @@ latest_tag() {
   esac
 }
 
+# winpath gives PowerShell a path it can open: Git Bash hands out /tmp/...,
+# which a Windows program reads against the root of the current drive.
+winpath() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | cut -d ' ' -f 1
@@ -133,15 +143,19 @@ if [ "$EXT" = "zip" ]; then
   if command -v unzip >/dev/null 2>&1; then
     unzip -q "$TMP/$ASSET" -d "$TMP/x"
   else
-    powershell.exe -NoProfile -Command "Expand-Archive -Path '$TMP/$ASSET' -DestinationPath '$TMP/x'" >/dev/null
+    powershell.exe -NoProfile -Command "Expand-Archive -Path '$(winpath "$TMP/$ASSET")' -DestinationPath '$(winpath "$TMP/x")'" >/dev/null
   fi
 else
   tar -xzf "$TMP/$ASSET" -C "$TMP/x"
 fi
 [ -f "$TMP/x/tgfake$EXE" ] || fail "the archive holds no tgfake$EXE"
 
+# Copied beside the target and renamed over it, so a running tgfake is
+# replaced rather than written into, and an interrupted install leaves the
+# old binary whole.
 mkdir -p "$BIN_DIR"
-cp "$TMP/x/tgfake$EXE" "$BIN_DIR/tgfake$EXE"
-chmod +x "$BIN_DIR/tgfake$EXE"
+cp "$TMP/x/tgfake$EXE" "$BIN_DIR/.tgfake$EXE.$$"
+chmod +x "$BIN_DIR/.tgfake$EXE.$$"
+mv -f "$BIN_DIR/.tgfake$EXE.$$" "$BIN_DIR/tgfake$EXE"
 log "installed ${VERSION} into ${BIN_DIR}"
 echo "${BIN_DIR}/tgfake${EXE}"

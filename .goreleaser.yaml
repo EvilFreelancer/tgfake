@@ -64,5 +64,5 @@ release:
   draft: false
   prerelease: auto
   footer: |
-    Install: `curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/main/scripts/install.sh | sh -s -- {{ .Tag }}`
+    Install: `curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/{{ .Tag }}/scripts/install.sh | sh -s -- {{ .Tag }}`
     or `go install github.com/EvilFreelancer/tgfake/cmd/tgfake@{{ .Tag }}`.

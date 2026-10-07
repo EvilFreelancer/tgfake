@@ -8,7 +8,7 @@
 #   TGFAKE_BIN=./bin/tgfake BOT_CMD="python3 bot.py" examples/shell/bot-e2e.sh
 #
 # Environment:
-#   TGFAKE_BIN  the tgfake binary (default: tgfake from PATH, else go run ./cmd/tgfake)
+#   TGFAKE_BIN  the tgfake binary (default: tgfake from PATH, else one built from ./cmd/tgfake)
 #   BOT_CMD     how to start the bot (default: the Go example in examples/echobot);
 #               it is given TELEGRAM_API (the stand's origin) and BOT_TOKEN
 #   PORT        the stand's port (default 18791)
@@ -91,11 +91,14 @@ wait_for chat_has "bot: Pong." || fail "the tap did not edit the message"
 sent_at_least answerCallbackQuery 1 || fail "the tap was not answered"
 echo "ok   a tap on Ping edits the greeting"
 
+# The next sendMessage is refused as a flood: the bot must have tried it and
+# been told so. Whether it then retries after retry_after is its own choice.
+n="$(curl -sf "$ORIGIN/sim/outbox/count?method=sendMessage" | tr -dc '0-9')"
 curl -sf -X POST "$ORIGIN/sim/fault" -H 'Content-Type: application/json' \
   -d '{"method": "sendMessage", "code": 429, "retry_after": 1, "times": 1}' >/dev/null
 say "under flood control"
-sleep 1
-chat_has "You said: under flood control" && fail "a refused sendMessage still reached the chat"
+wait_for sent_at_least sendMessage $((n + 1)) || fail "the bot did not try to answer under flood control"
+curl -sf "$ORIGIN/sim/outbox?method=sendMessage" | grep -q '"status":429' || fail "the bot's sendMessage was not refused"
 echo "ok   a flood-control fault is what the bot sees"
 
 echo "PASS"

@@ -21,9 +21,11 @@ EvilFreelancer/tgfake@vX.Y.Z` installs that same version).
 (`.tar.gz`, `.zip` on Windows) with `checksums.txt` beside them, for linux,
 darwin and windows on amd64 and arm64. `scripts/install.sh` builds the same
 names, `action.yml` calls the installer, and `docs/ci.md` documents them. A
-change to one is a change to all four, checked by the `Release path` job of
-`ci.yaml` (snapshot build, `scripts/test-install.sh`, the action from a local
-mirror) before it can reach a tag.
+change to one is a change to all four. The first three are exercised before a
+tag can exist: the `Release snapshot` job of `ci.yaml` builds every archive,
+and the `Install` job runs `scripts/test-install.sh` and the action from a
+local mirror of them on Linux, macOS and Windows. `docs/ci.md` is kept in step
+by review.
 
 ## Cutting one
 
