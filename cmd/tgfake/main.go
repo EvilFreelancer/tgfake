@@ -154,18 +154,22 @@ func newMux(fake *server.Server, stub *llmstub.Server) http.Handler {
 	return mux
 }
 
+// printBanner writes the banner in one write, so a reader that waits for its
+// first line never sees half of it.
 func printBanner(w io.Writer, origin, botUsername string, stub *llmstub.Server) {
-	_, _ = fmt.Fprintf(w, "tgfake %s: fake Bot API for @%s at %s\n", currentVersion(), botUsername, origin)
-	_, _ = fmt.Fprintf(w, "  Bot API:    %s/bot<token>/<method>  (in place of https://api.telegram.org)\n", origin)
-	_, _ = fmt.Fprintf(w, "  chat page:  %s/\n", origin)
-	_, _ = fmt.Fprintf(w, "  sim API:    %s/sim/\n", origin)
+	var b strings.Builder
+	fmt.Fprintf(&b, "tgfake %s: fake Bot API for @%s at %s\n", currentVersion(), botUsername, origin)
+	fmt.Fprintf(&b, "  Bot API:    %s/bot<token>/<method>  (in place of https://api.telegram.org)\n", origin)
+	fmt.Fprintf(&b, "  chat page:  %s/\n", origin)
+	fmt.Fprintf(&b, "  sim API:    %s/sim/\n", origin)
 	if stub != nil {
 		model := stub.Model
 		if model == "" {
 			model = llmstub.DefaultModel
 		}
-		_, _ = fmt.Fprintf(w, "  model:      %s/v1  (OpenAI-compatible, model %s, any API key)\n", origin, model)
+		fmt.Fprintf(&b, "  model:      %s/v1  (OpenAI-compatible, model %s, any API key)\n", origin, model)
 	}
+	_, _ = io.WriteString(w, b.String())
 }
 
 func loadRules(path string) ([]llmstub.Rule, error) {

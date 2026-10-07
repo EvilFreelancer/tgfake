@@ -18,6 +18,25 @@ func TestSignKnownVector(t *testing.T) {
 	if got := Sign("123456:ABC-DEF1234ghIkl", data); got != want {
 		t.Fatalf("Sign = %s, want %s", got, want)
 	}
+	data.Set("hash", want)
+	if _, err := Validate(data.Encode(), "123456:ABC-DEF1234ghIkl"); err != nil {
+		t.Fatalf("the known vector does not validate: %v", err)
+	}
+}
+
+// A field given twice is not launch data Telegram signed: Sign reads the
+// first value, so a second one would ride along unchecked.
+func TestValidateRefusesARepeatedField(t *testing.T) {
+	data := url.Values{"auth_date": {"1700000000"}, "user": {`{"id":4242}`}}
+	hash := Sign("123:TOKEN", data)
+	for name, initData := range map[string]string{
+		"a second user": "auth_date=1700000000&user=%7B%22id%22%3A4242%7D&user=%7B%22id%22%3A1%7D&hash=" + hash,
+		"a second hash": "auth_date=1700000000&user=%7B%22id%22%3A4242%7D&hash=" + hash + "&hash=00",
+	} {
+		if _, err := Validate(initData, "123:TOKEN"); !errors.Is(err, ErrBadHash) {
+			t.Errorf("%s: Validate = %v, want ErrBadHash", name, err)
+		}
+	}
 }
 
 func TestValidateAcceptsWhatSignSigned(t *testing.T) {
@@ -67,7 +86,7 @@ func TestURLProblemAdmitsHTTPSAndThisMachineOnly(t *testing.T) {
 			t.Errorf("URLProblem(%q) = %q", ok, p)
 		}
 	}
-	for _, bad := range []string{"http://app.example.com/", "ftp://app.example.com/", "app.example.com", ""} {
+	for _, bad := range []string{"http://app.example.com/", "ftp://app.example.com/", "app.example.com", "", "https://:443/app", "https://:/x"} {
 		if URLProblem(bad) == "" {
 			t.Errorf("URLProblem(%q) admitted it", bad)
 		}

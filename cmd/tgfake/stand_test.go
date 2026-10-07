@@ -60,6 +60,7 @@ func startCommand(t *testing.T, args ...string) *command {
 		}
 		select {
 		case err := <-c.done:
+			c.done <- err // for the cleanup's stop, which would wait for it otherwise
 			t.Fatalf("the command exited before serving: %v\n%s", err, c.out.String())
 		case <-time.After(10 * time.Millisecond):
 		}

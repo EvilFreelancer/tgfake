@@ -230,8 +230,8 @@ What Telegram does around a Mini App launch, with no state of its own ([mini-app
 | Name | What it is |
 |------|------------|
 | `Sign(token string, data url.Values) string` | The `hash` Telegram puts into launch data for these fields under the bot's token. |
-| `Validate(initData, token string) (url.Values, error)` | Checks launch data against the token and returns its fields; `ErrBadHash` when the hash is missing or wrong. It does not judge `auth_date`. |
-| `ErrBadHash` | The error `Validate` returns for a hash that does not check out. |
+| `Validate(initData, token string) (url.Values, error)` | Checks launch data against the token and returns its fields; `ErrBadHash` when the hash is missing or wrong, or a field appears twice. It does not judge `auth_date`. |
+| `ErrBadHash` | The error `Validate` returns for a hash that does not check out or a repeated field. |
 | `ThemeParams(scheme string) map[string]string` | The colours of the `light` theme, or of the dark one for any other scheme. |
 | `URLProblem(raw string) string` | Why Telegram would not open an address as a Mini App, or `""`: an absolute https address, or plain http on this machine. |
 | `IsLoopbackHost(host string) bool` | Whether a host is `localhost` or a loopback address. |

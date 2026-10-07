@@ -46,7 +46,7 @@ func IsLoopbackHost(host string) bool {
 // it would: an absolute https address, or plain http on this machine.
 func URLProblem(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+	if err != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return fmt.Sprintf("Web App URL '%s' is invalid", raw)
 	}
 	if u.Scheme == "http" && !IsLoopbackHost(u.Hostname()) {
@@ -92,8 +92,8 @@ func Sign(token string, data url.Values) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// ErrBadHash is returned by Validate for launch data that carries no hash, or
-// one the token does not produce.
+// ErrBadHash is returned by Validate for launch data that carries no hash,
+// one the token does not produce, or a field more than once.
 var ErrBadHash = errors.New("webapp: launch data hash does not match the bot's token")
 
 // Validate checks launch data (tgWebAppData, the initData of the Telegram Web
@@ -104,6 +104,13 @@ func Validate(initData, token string) (url.Values, error) {
 	data, err := url.ParseQuery(initData)
 	if err != nil {
 		return nil, fmt.Errorf("webapp: launch data is not a query string: %w", err)
+	}
+	// Sign reads the first value of a field, so a second one would be
+	// returned without having been checked: Telegram never repeats a field.
+	for _, values := range data {
+		if len(values) != 1 {
+			return nil, ErrBadHash
+		}
 	}
 	got, err := hex.DecodeString(data.Get("hash"))
 	if err != nil || len(got) == 0 {

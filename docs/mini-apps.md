@@ -13,7 +13,7 @@ A bot offers its Mini App with an inline keyboard button that carries `web_app` 
 The stand accepts it in `sendMessage`, `editMessageText` and `editMessageReplyMarkup` on two conditions, as Telegram does:
 
 - The chat is private. A `web_app` button in a group or supergroup is refused with `Bad Request: BUTTON_TYPE_INVALID`. A chat the stand has not seen yet counts as private when its id is positive.
-- The address is one Telegram would open ([`webapp.URLProblem`](../pkg/webapp/webapp.go)): an absolute `https` URL, or plain `http` on this machine, meaning the host `localhost` or a loopback IP such as `127.0.0.1` or `::1`. Telegram itself never opens plain http; the stand allows it on loopback so a Mini App served by a dev server on a local port can be opened from the chat page. Anything else is refused with `Bad Request: inline keyboard button Web App URL '<url>' is invalid`, and plain http to another host adds `: Only HTTPS links are allowed`.
+- The address is one Telegram would open ([`webapp.URLProblem`](../pkg/webapp/webapp.go)): an absolute `https` URL with a host name, or plain `http` on this machine, meaning the host `localhost` or a loopback IP such as `127.0.0.1` or `::1`. Telegram itself never opens plain http; the stand allows it on loopback so a Mini App served by a dev server on a local port can be opened from the chat page. Anything else is refused with `Bad Request: inline keyboard button Web App URL '<url>' is invalid`, and plain http to another host adds `: Only HTTPS links are allowed`.
 
 A `web_app` button is not tapped through `POST /sim/callback`: it is opened as a [launch](#launches). On the chat page it is marked with an arrow and opens the app in the [phone frame](#the-phone-frame).
 
@@ -143,7 +143,7 @@ A launch carries the colours of a Telegram theme in `tgWebAppThemeParams`, and `
 
 ## Checking launch data in a Mini App's test
 
-A Mini App's server has to check the launch data its page sends it before trusting the user in it. [`webapp.Validate`](../pkg/webapp/webapp.go) does that check: it parses the launch data, recomputes the hash with the token and returns the fields, or `webapp.ErrBadHash` for data without a hash or with one the token does not produce (and a parse error for a string that is not a query string). It does not judge `auth_date`; how old a launch may be is the app's own decision. An app written in Go can call it in production; for an app in another language it is the reference its own check is tested against.
+A Mini App's server has to check the launch data its page sends it before trusting the user in it. [`webapp.Validate`](../pkg/webapp/webapp.go) does that check: it parses the launch data, recomputes the hash with the token and returns the fields, or `webapp.ErrBadHash` for data without a hash, with one the token does not produce, or with a field given twice, whose second value the hash would not cover (and a parse error for a string that is not a query string). It does not judge `auth_date`; how old a launch may be is the app's own decision. An app written in Go can call it in production; for an app in another language it is the reference its own check is tested against.
 
 A Go test of an app's launch handler, with the stand in-process:
 
