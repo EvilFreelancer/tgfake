@@ -224,13 +224,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message is too long", 0)
 		return
 	}
-	markup, problem := parseKeyboard(params.Get("reply_markup"))
-	if problem == "" {
-		s.mu.Lock()
-		chatType := s.chatTypeLocked(chatID)
-		s.mu.Unlock()
-		problem = validateKeyboard(markup, chatType)
-	}
+	markup, problem := s.keyboardFor(chatID, params)
 	if problem != "" {
 		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
@@ -255,6 +249,23 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)
+}
+
+// keyboardFor reads and checks the reply_markup of a message to chatID: the
+// inline keyboard, or "" when there is none, and Telegram's refusal when it
+// would not take it.
+func (s *Server) keyboardFor(chatID int64, params url.Values) (*botapi.InlineKeyboardMarkup, string) {
+	markup, problem := parseKeyboard(params.Get("reply_markup"))
+	if problem != "" {
+		return nil, problem
+	}
+	s.mu.Lock()
+	chatType := s.chatTypeLocked(chatID)
+	s.mu.Unlock()
+	if problem := validateKeyboard(markup, chatType); problem != "" {
+		return nil, problem
+	}
+	return markup, ""
 }
 
 // mediaCaptionMax is Telegram's limit on the caption of a media message, in
@@ -312,6 +323,11 @@ func (s *Server) sendMedia(w http.ResponseWriter, r *http.Request, method string
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message caption is too long", 0)
 		return
 	}
+	markup, problem := s.keyboardFor(chatID, params)
+	if problem != "" {
+		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
+		return
+	}
 	var cfg image.Config
 	if field == "photo" {
 		var err error
@@ -335,7 +351,7 @@ func (s *Server) sendMedia(w http.ResponseWriter, r *http.Request, method string
 	id := "file_" + strconv.Itoa(s.nextFileID)
 	f := &storedFile{id: id, name: header.Filename, mimeType: mimeType, data: data, width: cfg.Width, height: cfg.Height}
 	s.files[id] = f
-	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: caption, ReplyToMessage: quoted}
+	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: caption, ReplyToMessage: quoted, ReplyMarkup: markup}
 	if field == "photo" {
 		msg.Photo = []botapi.PhotoSize{{FileID: id, FileUniqueID: "u" + id, Width: cfg.Width, Height: cfg.Height, FileSize: len(data)}}
 	} else {

@@ -67,6 +67,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q: tgfake takes flags only", fs.Arg(0))
+	}
+	if !*llm {
+		var orphan string
+		fs.Visit(func(f *flag.Flag) {
+			if orphan == "" && strings.HasPrefix(f.Name, "llm-") {
+				orphan = f.Name
+			}
+		})
+		if orphan != "" {
+			return fmt.Errorf("--%s configures the scripted model, which only --llm serves", orphan)
+		}
+	}
 	if *showVersion {
 		_, err := fmt.Fprintf(stdout, "tgfake %s\n", currentVersion())
 		return err

@@ -914,3 +914,13 @@ func TestBotFirstNameIsReportedAndSignsTheBotsMessages(t *testing.T) {
 		t.Fatalf("sendMessage from = %v", from)
 	}
 }
+
+// Before setMyCommands a bot has no commands, which Telegram answers with an
+// empty list, not null.
+func TestGetMyCommandsBeforeAnySetIsAnEmptyList(t *testing.T) {
+	s := newStand(t, Options{})
+	_, body := s.call("getMyCommands", nil)
+	if got, ok := body["result"].([]any); !ok || len(got) != 0 {
+		t.Fatalf("getMyCommands = %#v, want []", body["result"])
+	}
+}

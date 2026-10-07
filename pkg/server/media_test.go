@@ -176,3 +176,24 @@ func TestSendPhotoWithoutAnUploadIsRefusedAsHavingNoFile(t *testing.T) {
 		t.Fatalf("sendPhoto without an upload = %d %v, want 400 naming the missing photo", code, out)
 	}
 }
+
+// A photo or a document carries the keyboard it was sent with, as on
+// Telegram, and the keyboard is held to the same rules as a text message's.
+func TestSendMediaCarriesItsKeyboard(t *testing.T) {
+	s := newStand(t, Options{})
+	keyboard := `{"inline_keyboard":[[{"text":"Again","callback_data":"again"}]]}`
+	status, body := s.upload("sendPhoto", map[string]string{"chat_id": "4242", "reply_markup": keyboard}, "photo", "red.png", mediaPNG(t, 4, 3))
+	if status != http.StatusOK {
+		t.Fatalf("sendPhoto: %d %v", status, body)
+	}
+	if markup, _ := result(t, body)["reply_markup"].(map[string]any); markup == nil {
+		t.Fatalf("the answer lost the keyboard: %v", body)
+	}
+	if msgID, data, ok := s.fake.Chat(4242).FindButton("Again"); !ok || data != "again" || msgID == 0 {
+		t.Fatalf("the chat shows no keyboard under the photo:\n%s", s.fake.Chat(4242).Text())
+	}
+	status, body = s.upload("sendDocument", map[string]string{"chat_id": "4242", "reply_markup": `{"inline_keyboard":[[{"text":"x","callback_data":"` + strings.Repeat("d", 65) + `"}]]}`}, "document", "notes.txt", []byte("notes"))
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: BUTTON_DATA_INVALID" {
+		t.Fatalf("a document with 65 bytes of callback_data: %d %v", status, body)
+	}
+}

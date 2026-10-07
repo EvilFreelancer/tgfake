@@ -248,7 +248,9 @@ func (s *Server) WaitCall(method string, n int, timeout time.Duration) bool {
 func (s *Server) Commands() []botapi.BotCommand {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]botapi.BotCommand(nil), s.commands...)
+	// Never nil: a bot with no commands has an empty list, which getMyCommands
+	// answers as [] the way Telegram does.
+	return append([]botapi.BotCommand{}, s.commands...)
 }
 
 // record appends a call to the outbox. Caller holds s.mu.

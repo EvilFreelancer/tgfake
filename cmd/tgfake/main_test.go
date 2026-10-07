@@ -130,3 +130,28 @@ func TestRunStopsWhenTheContextEnds(t *testing.T) {
 		t.Fatalf("run returned %v on a cancelled context", err)
 	}
 }
+
+// A model flag without --llm would be ignored, a missing script included; the
+// command says so instead of serving a stand without the model asked for.
+func TestRunRefusesModelFlagsWithoutLLM(t *testing.T) {
+	for _, args := range [][]string{
+		{"--llm-script", "missing.json"},
+		{"--llm-answer", "hi"},
+		{"--llm-strip-tag", "turn_context"},
+		{"--llm-model", "x"},
+	} {
+		err := run(context.Background(), append([]string{"--addr", "127.0.0.1:0"}, args...), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "--llm") {
+			t.Errorf("%v without --llm: %v", args, err)
+		}
+	}
+}
+
+// The flag parser stops at the first word that is not a flag, so anything
+// after one would be dropped unseen.
+func TestRunRefusesAPositionalArgument(t *testing.T) {
+	err := run(context.Background(), []string{"--addr", "127.0.0.1:0", "extra", "--llm"}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "extra") {
+		t.Fatalf("a positional argument was accepted: %v", err)
+	}
+}
