@@ -1,4 +1,4 @@
-package tgfake
+package server
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf16"
+
+	"github.com/EvilFreelancer/tgfake/pkg/botapi"
 )
 
 // IncomingMessage is a message a person types into a chat. Zero fields take
@@ -85,22 +87,22 @@ func (in *IncomingMessage) normalize() {
 // becomes the next update. It returns the update id and the message id.
 func (s *Server) InjectMessage(in IncomingMessage) (updateID, messageID int) {
 	in.normalize()
-	from := &User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username}
+	from := &botapi.User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username}
 	text := in.Text
-	var entities []MessageEntity
+	var entities []botapi.MessageEntity
 	if in.Mention {
 		mention := "@" + s.opts.BotUsername
 		text = mention + " " + text
-		entities = append(entities, MessageEntity{Type: "mention", Offset: 0, Length: utf16Len(mention)})
+		entities = append(entities, botapi.MessageEntity{Type: "mention", Offset: 0, Length: utf16Len(mention)})
 	}
 	if m := commandPattern.FindString(text); m != "" {
-		entities = append(entities, MessageEntity{Type: "bot_command", Offset: 0, Length: utf16Len(m)})
+		entities = append(entities, botapi.MessageEntity{Type: "bot_command", Offset: 0, Length: utf16Len(m)})
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	chat := s.ensureChatLocked(in.ChatID, in.ChatType, in.ChatTitle, from)
-	msg := &Message{
+	msg := &botapi.Message{
 		From:     from,
 		Chat:     chat.wire(),
 		Date:     s.now().Unix(),
@@ -113,7 +115,7 @@ func (s *Server) InjectMessage(in IncomingMessage) (updateID, messageID int) {
 		}
 	}
 	stored := chat.appendLocked(msg, false, "", false)
-	upd := s.pushUpdateLocked(Update{Message: stored.clone()})
+	upd := s.pushUpdateLocked(botapi.Update{Message: stored.clone()})
 	return upd, stored.msg.MessageID
 }
 
@@ -168,9 +170,9 @@ func (s *Server) InjectCallback(in IncomingCallback) (updateID int, callbackID s
 	s.nextCbq++
 	id := "cbq-" + strconv.Itoa(s.nextCbq)
 	s.cbqChat[id] = in.ChatID
-	upd := s.pushUpdateLocked(Update{CallbackQuery: &CallbackQuery{
+	upd := s.pushUpdateLocked(botapi.Update{CallbackQuery: &botapi.CallbackQuery{
 		ID:           id,
-		From:         User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username},
+		From:         botapi.User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username},
 		Message:      target.clone(),
 		ChatInstance: strconv.FormatInt(in.ChatID, 10),
 		Data:         data,
@@ -182,7 +184,7 @@ func (s *Server) InjectCallback(in IncomingCallback) (updateID int, callbackID s
 // in force at creation includes its kind. Later polls cannot recover an
 // excluded update or discard one that was already queued.
 // Caller holds s.mu.
-func (s *Server) pushUpdateLocked(u Update) int {
+func (s *Server) pushUpdateLocked(u botapi.Update) int {
 	u.UpdateID = s.nextUpdate
 	s.nextUpdate++
 	if !s.deliverableLocked(u) {
@@ -200,8 +202,8 @@ func (s *Server) wakeLocked() {
 	s.wake = make(chan struct{})
 }
 
-// kind names an update the way allowed_updates does.
-func (u Update) kind() string {
+// updateKind names an update the way allowed_updates does.
+func updateKind(u botapi.Update) string {
 	switch {
 	case u.CallbackQuery != nil:
 		return "callback_query"
@@ -212,12 +214,12 @@ func (u Update) kind() string {
 
 // deliverableLocked reports whether the subscription in force includes an
 // update. Caller holds s.mu.
-func (s *Server) deliverableLocked(u Update) bool {
+func (s *Server) deliverableLocked(u botapi.Update) bool {
 	if s.allowed == nil {
 		return true
 	}
 	for _, k := range s.allowed {
-		if k == u.kind() {
+		if k == updateKind(u) {
 			return true
 		}
 	}
@@ -228,7 +230,7 @@ func (s *Server) deliverableLocked(u Update) bool {
 // of what is left. A negative offset counts from the end of the queue, as on
 // api.telegram.org: -1 keeps the newest update and forgets the rest.
 // Subscription changes affect only new updates. Caller holds s.mu.
-func (s *Server) takeUpdatesLocked(offset, limit int) []Update {
+func (s *Server) takeUpdatesLocked(offset, limit int) []botapi.Update {
 	if offset < 0 {
 		if from := len(s.pending) + offset; from > 0 {
 			offset = s.pending[from].UpdateID
@@ -243,14 +245,14 @@ func (s *Server) takeUpdatesLocked(offset, limit int) []Update {
 		}
 	}
 	for i := len(kept); i < len(s.pending); i++ {
-		s.pending[i] = Update{}
+		s.pending[i] = botapi.Update{}
 	}
 	s.pending = kept
 	if limit <= 0 || limit > defaultPollLimit {
 		limit = defaultPollLimit
 	}
 	n := min(len(s.pending), limit)
-	out := make([]Update, n)
+	out := make([]botapi.Update, n)
 	copy(out, s.pending[:n])
 	return out
 }

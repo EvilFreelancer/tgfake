@@ -1,4 +1,4 @@
-package tgfake
+package server
 
 import (
 	"bytes"
@@ -16,6 +16,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/EvilFreelancer/tgfake/pkg/botapi"
+	"github.com/EvilFreelancer/tgfake/pkg/webapp"
 )
 
 // serveBotAPI answers /bot<token>/<method>. Anything else under / is a 404
@@ -195,7 +198,7 @@ func (s *Server) closed() bool {
 }
 
 func (s *Server) setMyCommands(w http.ResponseWriter, method string, params url.Values) {
-	var cmds []BotCommand
+	var cmds []botapi.BotCommand
 	if err := json.Unmarshal([]byte(params.Get("commands")), &cmds); err != nil {
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't parse commands JSON object", 0)
 		return
@@ -240,7 +243,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
 	}
-	msg := &Message{
+	msg := &botapi.Message{
 		From:           s.botUser(),
 		Chat:           chat.wire(),
 		Date:           s.now().Unix(),
@@ -332,11 +335,11 @@ func (s *Server) sendMedia(w http.ResponseWriter, r *http.Request, method string
 	id := "file_" + strconv.Itoa(s.nextFileID)
 	f := &storedFile{id: id, name: header.Filename, mimeType: mimeType, data: data, width: cfg.Width, height: cfg.Height}
 	s.files[id] = f
-	msg := &Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: caption, ReplyToMessage: quoted}
+	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: caption, ReplyToMessage: quoted}
 	if field == "photo" {
-		msg.Photo = []PhotoSize{{FileID: id, FileUniqueID: "u" + id, Width: cfg.Width, Height: cfg.Height, FileSize: len(data)}}
+		msg.Photo = []botapi.PhotoSize{{FileID: id, FileUniqueID: "u" + id, Width: cfg.Width, Height: cfg.Height, FileSize: len(data)}}
 	} else {
-		msg.Document = &Document{FileID: id, FileUniqueID: "u" + id, FileName: header.Filename, MimeType: mimeType, FileSize: len(data)}
+		msg.Document = &botapi.Document{FileID: id, FileUniqueID: "u" + id, FileName: header.Filename, MimeType: mimeType, FileSize: len(data)}
 	}
 	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
 	stored.file = f
@@ -503,7 +506,7 @@ func (s *Server) sendRichMessage(w http.ResponseWriter, method string, params ur
 		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
 	}
-	msg := &Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Text: body, ReplyToMessage: quoted}
+	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Text: body, ReplyToMessage: quoted}
 	stored := chat.appendLocked(msg, true, "", true)
 	result := stored.clone()
 	s.mu.Unlock()
@@ -542,8 +545,8 @@ func (s *Server) sendRichMessageDraft(w http.ResponseWriter, method string, para
 	s.writeResult(w, method, params, true)
 }
 
-func (s *Server) botUser() *User {
-	return &User{ID: s.opts.BotID, IsBot: true, FirstName: s.opts.BotFirstName, Username: s.opts.BotUsername}
+func (s *Server) botUser() *botapi.User {
+	return &botapi.User{ID: s.opts.BotID, IsBot: true, FirstName: s.opts.BotFirstName, Username: s.opts.BotUsername}
 }
 
 // writeResult answers ok:true and files the call.
@@ -590,7 +593,7 @@ const messageTextMax = 4096
 // allow_sending_without_reply is set, in which case the message goes out
 // unthreaded; the fake does the same. It returns the quote to attach, or the
 // error description. Caller holds s.mu.
-func replyTargetLocked(chat *chatState, params url.Values) (*Message, string) {
+func replyTargetLocked(chat *chatState, params url.Values) (*botapi.Message, string) {
 	var reply struct {
 		MessageID                int  `json:"message_id"`
 		AllowSendingWithoutReply bool `json:"allow_sending_without_reply"`
@@ -626,7 +629,7 @@ const inlineKeyboardNotArray = `Bad Request: Field "inline_keyboard" must be of 
 // refused the way the Bot API server refuses it: that null is what a library
 // sends for a keyboard built from no rows, and a real chat never shows the
 // message it came with. It returns the keyboard, or the error description.
-func parseKeyboard(raw string) (*InlineKeyboardMarkup, string) {
+func parseKeyboard(raw string) (*botapi.InlineKeyboardMarkup, string) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, ""
 	}
@@ -641,7 +644,7 @@ func parseKeyboard(raw string) (*InlineKeyboardMarkup, string) {
 	if trimmed := strings.TrimSpace(string(value)); !strings.HasPrefix(trimmed, "[") {
 		return nil, inlineKeyboardNotArray
 	}
-	var kb InlineKeyboardMarkup
+	var kb botapi.InlineKeyboardMarkup
 	if err := json.Unmarshal([]byte(raw), &kb); err != nil || len(kb.InlineKeyboard) == 0 {
 		return nil, ""
 	}
@@ -658,7 +661,7 @@ const callbackDataMax = 64
 // open. It also refuses a button with more than one action, which Telegram
 // would read as its first. It returns the error description, or "" for a
 // keyboard the stand takes in a chat of chatType.
-func validateKeyboard(kb *InlineKeyboardMarkup, chatType string) string {
+func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string) string {
 	if kb == nil {
 		return ""
 	}
@@ -685,7 +688,7 @@ func validateKeyboard(kb *InlineKeyboardMarkup, chatType string) string {
 				if chatType != "private" {
 					return "Bad Request: BUTTON_TYPE_INVALID"
 				}
-				if problem := webAppURLProblem(b.WebApp.URL); problem != "" {
+				if problem := webapp.URLProblem(b.WebApp.URL); problem != "" {
 					return "Bad Request: inline keyboard button " + problem
 				}
 			}
@@ -694,7 +697,7 @@ func validateKeyboard(kb *InlineKeyboardMarkup, chatType string) string {
 	return ""
 }
 
-func sameKeyboard(a, b *InlineKeyboardMarkup) bool {
+func sameKeyboard(a, b *botapi.InlineKeyboardMarkup) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}

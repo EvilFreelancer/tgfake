@@ -1,4 +1,4 @@
-package tgfake
+package server
 
 import (
 	"crypto/hmac"
@@ -889,22 +889,6 @@ func TestLaunchWebApp_Options(t *testing.T) {
 	if !strings.HasPrefix(launch.URL, "https://app.example.com/#/s/sess_1?tgWebAppData=") {
 		t.Fatalf("launch URL with a fragment: %q", launch.URL)
 	}
-}
-
-// A fixed vector, computed outside this package (Python's hmac over the
-// documented data-check-string), so the fake's signing and the checker above
-// cannot agree on the same mistake.
-func TestSignInitData_KnownVector(t *testing.T) {
-	data := url.Values{}
-	data.Set("auth_date", "1700000000")
-	data.Set("query_id", "AAHdF6IQAAAAAN0XohDhrOrc")
-	data.Set("user", `{"id":279058397,"first_name":"Vladislav","username":"vdkfrost","language_code":"ru"}`)
-	const want = "d16b987afd609aa3c33232cac13427d98b80535d6e4b3e4025a02a336fd343ef"
-	if got := signInitData("123456:ABC-DEF1234ghIkl", data); got != want {
-		t.Fatalf("signInitData = %s, want %s", got, want)
-	}
-	data.Set("hash", want)
-	checkInitData(t, "123456:ABC-DEF1234ghIkl", data.Encode())
 }
 
 // A stand started with no options is a bot of its own, named after the stand.

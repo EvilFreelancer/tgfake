@@ -1,4 +1,4 @@
-package tgfake
+package server
 
 import (
 	"fmt"
@@ -74,7 +74,7 @@ func TestFakeMiniAppFeature(t *testing.T) {
 				return nil
 			})
 		},
-		Options: &godog.Options{Format: "pretty", Paths: []string{"features/mini_app.feature"}, TestingT: t, Strict: true},
+		Options: &godog.Options{Format: "pretty", Paths: []string{"../../features/mini_app.feature"}, TestingT: t, Strict: true},
 	}
 	if suite.Run() != 0 {
 		t.Fatal("Telegram stand Mini App feature failed")

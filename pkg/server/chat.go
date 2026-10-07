@@ -1,9 +1,11 @@
-package tgfake
+package server
 
 import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/EvilFreelancer/tgfake/pkg/botapi"
 )
 
 // chatState is one chat as the fake remembers it: who is in it, every
@@ -13,7 +15,7 @@ type chatState struct {
 	id        int64
 	typ       string
 	title     string
-	user      *User // the person on the other side of a private chat
+	user      *botapi.User // the person on the other side of a private chat
 	nextMsgID int
 	messages  []*storedMessage
 	byID      map[int]*storedMessage
@@ -25,7 +27,7 @@ type chatState struct {
 // storedMessage is a message plus what the transcript view wants to know
 // about it.
 type storedMessage struct {
-	msg       Message
+	msg       botapi.Message
 	fromBot   bool
 	parseMode string
 	edited    bool
@@ -51,7 +53,7 @@ type CallbackAnswer struct {
 // ensureChatLocked returns the chat, creating it on first sight. A private
 // chat created by the bot itself (a sendMessage to a chat nobody wrote from)
 // has no user until somebody does. Caller holds s.mu.
-func (s *Server) ensureChatLocked(id int64, typ, title string, user *User) *chatState {
+func (s *Server) ensureChatLocked(id int64, typ, title string, user *botapi.User) *chatState {
 	c := s.chats[id]
 	if c == nil {
 		if typ == "" {
@@ -73,8 +75,8 @@ func (s *Server) ensureChatLocked(id int64, typ, title string, user *User) *chat
 }
 
 // wire is the Chat object messages of this chat carry.
-func (c *chatState) wire() Chat {
-	ch := Chat{ID: c.id, Type: c.typ}
+func (c *chatState) wire() botapi.Chat {
+	ch := botapi.Chat{ID: c.id, Type: c.typ}
 	if c.typ == "private" {
 		if c.user != nil {
 			ch.FirstName = c.user.FirstName
@@ -87,7 +89,7 @@ func (c *chatState) wire() Chat {
 }
 
 // appendLocked numbers a message and stores it. Caller holds s.mu.
-func (c *chatState) appendLocked(msg *Message, fromBot bool, parseMode string, rich bool) *storedMessage {
+func (c *chatState) appendLocked(msg *botapi.Message, fromBot bool, parseMode string, rich bool) *storedMessage {
 	c.nextMsgID++
 	msg.MessageID = c.nextMsgID
 	st := &storedMessage{msg: *msg, fromBot: fromBot, parseMode: parseMode, rich: rich}
@@ -97,12 +99,12 @@ func (c *chatState) appendLocked(msg *Message, fromBot bool, parseMode string, r
 }
 
 // clone returns a copy of the message as the wire carries it.
-func (m *storedMessage) clone() *Message {
+func (m *storedMessage) clone() *botapi.Message {
 	out := m.msg
 	if m.msg.ReplyMarkup != nil {
-		kb := &InlineKeyboardMarkup{InlineKeyboard: make([][]InlineKeyboardButton, len(m.msg.ReplyMarkup.InlineKeyboard))}
+		kb := &botapi.InlineKeyboardMarkup{InlineKeyboard: make([][]botapi.InlineKeyboardButton, len(m.msg.ReplyMarkup.InlineKeyboard))}
 		for i, row := range m.msg.ReplyMarkup.InlineKeyboard {
-			kb.InlineKeyboard[i] = append([]InlineKeyboardButton(nil), row...)
+			kb.InlineKeyboard[i] = append([]botapi.InlineKeyboardButton(nil), row...)
 			for j := range kb.InlineKeyboard[i] {
 				if app := kb.InlineKeyboard[i][j].WebApp; app != nil {
 					copied := *app
@@ -116,8 +118,8 @@ func (m *storedMessage) clone() *Message {
 		q := *m.msg.ReplyToMessage
 		out.ReplyToMessage = &q
 	}
-	out.Entities = append([]MessageEntity(nil), m.msg.Entities...)
-	out.Photo = append([]PhotoSize(nil), m.msg.Photo...)
+	out.Entities = append([]botapi.MessageEntity(nil), m.msg.Entities...)
+	out.Photo = append([]botapi.PhotoSize(nil), m.msg.Photo...)
 	if m.msg.Document != nil {
 		d := *m.msg.Document
 		out.Document = &d
@@ -127,7 +129,7 @@ func (m *storedMessage) clone() *Message {
 
 // quoted is the shape a message takes inside reply_to_message: the message
 // itself without its own quote.
-func (m *storedMessage) quoted() *Message {
+func (m *storedMessage) quoted() *botapi.Message {
 	q := m.clone()
 	q.ReplyToMessage = nil
 	return q
@@ -135,7 +137,7 @@ func (m *storedMessage) quoted() *Message {
 
 // button finds a keyboard button by its visible text, ignoring the check
 // mark a bot puts in front of the current choice.
-func (m *storedMessage) button(label string) *InlineKeyboardButton {
+func (m *storedMessage) button(label string) *botapi.InlineKeyboardButton {
 	if m.msg.ReplyMarkup == nil {
 		return nil
 	}
@@ -160,7 +162,7 @@ type ChatView struct {
 	Drafts    []DraftView      `json:"drafts"`
 	Callbacks []CallbackAnswer `json:"callbacks"`
 	// MenuButton is the menu button the chat shows: its own, else the bot's.
-	MenuButton *MenuButton `json:"menu_button,omitempty"`
+	MenuButton *botapi.MenuButton `json:"menu_button,omitempty"`
 }
 
 // FindButton looks a button up by its visible text, the way a person finds
@@ -187,19 +189,19 @@ func (v ChatView) FindButton(label string) (messageID int, data string, ok bool)
 
 // MessageView is one message of a ChatView.
 type MessageView struct {
-	MessageID        int                      `json:"message_id"`
-	From             string                   `json:"from"` // "bot" or "user"
-	Username         string                   `json:"username,omitempty"`
-	Text             string                   `json:"text"`
-	Caption          string                   `json:"caption,omitempty"`
-	Photo            *FileView                `json:"photo,omitempty"`
-	Document         *FileView                `json:"document,omitempty"`
-	ParseMode        string                   `json:"parse_mode,omitempty"`
-	ReplyToMessageID int                      `json:"reply_to_message_id,omitempty"`
-	Edited           bool                     `json:"edited"`
-	Deleted          bool                     `json:"deleted"`
-	Rich             bool                     `json:"rich"`
-	Keyboard         [][]InlineKeyboardButton `json:"keyboard,omitempty"`
+	MessageID        int                             `json:"message_id"`
+	From             string                          `json:"from"` // "bot" or "user"
+	Username         string                          `json:"username,omitempty"`
+	Text             string                          `json:"text"`
+	Caption          string                          `json:"caption,omitempty"`
+	Photo            *FileView                       `json:"photo,omitempty"`
+	Document         *FileView                       `json:"document,omitempty"`
+	ParseMode        string                          `json:"parse_mode,omitempty"`
+	ReplyToMessageID int                             `json:"reply_to_message_id,omitempty"`
+	Edited           bool                            `json:"edited"`
+	Deleted          bool                            `json:"deleted"`
+	Rich             bool                            `json:"rich"`
+	Keyboard         [][]botapi.InlineKeyboardButton `json:"keyboard,omitempty"`
 }
 
 // FileView is the photo or document of a MessageView.

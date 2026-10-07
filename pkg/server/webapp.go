@@ -1,18 +1,16 @@
-package tgfake
+package server
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/EvilFreelancer/tgfake/pkg/botapi"
+	"github.com/EvilFreelancer/tgfake/pkg/webapp"
 )
 
 // Mini Apps, as Telegram handles them around a bot: the web_app buttons and
@@ -22,45 +20,9 @@ import (
 // app's side (core.telegram.org/bots/webapps, "Validating data received via
 // the Mini App") gets the answer it would get from Telegram.
 
-const (
-	// webAppVersion is the Bot API version the stand claims as the client's
-	// (tgWebAppVersion): the latest the Mini App documentation names.
-	webAppVersion = "10.1"
-	// webAppPlatform is what tgWebAppPlatform says: an app that tells
-	// platforms apart sees the stand as one of its own.
-	webAppPlatform = "tgfake"
-	// defaultColorScheme is the theme a launch carries when none is asked.
-	defaultColorScheme = "dark"
-)
-
-// isLoopbackHost reports whether host names this machine: localhost or a
-// loopback address. The stand lets a Mini App run there over plain http,
-// which Telegram itself never does, so a web app started on a port of this
-// machine can be opened from the chat page.
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
-// webAppURLProblem says why Telegram would not open raw as a Mini App, or ""
-// when it would: an absolute https address, or plain http on this machine.
-func webAppURLProblem(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-		return fmt.Sprintf("Web App URL '%s' is invalid", raw)
-	}
-	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
-		return fmt.Sprintf("Web App URL '%s' is invalid: Only HTTPS links are allowed", raw)
-	}
-	return ""
-}
-
 // webAppURLOf returns the address a web_app button opens, "" for any other
 // button.
-func webAppURLOf(b InlineKeyboardButton) string {
+func webAppURLOf(b botapi.InlineKeyboardButton) string {
 	if b.WebApp == nil {
 		return ""
 	}
@@ -93,16 +55,16 @@ func (s *Server) Token() string {
 
 // MenuButton is the menu button chat shows: its own, else the bot's; chat 0
 // asks for the bot's. A bot that set nothing shows its commands.
-func (s *Server) MenuButton(chat int64) MenuButton {
+func (s *Server) MenuButton(chat int64) botapi.MenuButton {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.menuButtonLocked(chat)
 }
 
-func (s *Server) menuButtonLocked(chat int64) MenuButton {
+func (s *Server) menuButtonLocked(chat int64) botapi.MenuButton {
 	// Telegram shows a bot's menu button in private chats only.
 	if chat != 0 && s.chatTypeLocked(chat) != "private" {
-		return MenuButton{Type: "commands"}
+		return botapi.MenuButton{Type: "commands"}
 	}
 	if b := s.chatMenus[chat]; chat != 0 && b != nil {
 		return cloneMenuButton(*b)
@@ -110,10 +72,10 @@ func (s *Server) menuButtonLocked(chat int64) MenuButton {
 	if s.defaultMenu != nil {
 		return cloneMenuButton(*s.defaultMenu)
 	}
-	return MenuButton{Type: "commands"}
+	return botapi.MenuButton{Type: "commands"}
 }
 
-func cloneMenuButton(b MenuButton) MenuButton {
+func cloneMenuButton(b botapi.MenuButton) botapi.MenuButton {
 	if b.WebApp != nil {
 		app := *b.WebApp
 		b.WebApp = &app
@@ -142,7 +104,7 @@ func (s *Server) menuButtonChat(w http.ResponseWriter, method string, params url
 // removes the chat's own button, or puts the bot's back to its commands. The
 // button is checked before the chat, as the Bot API does.
 func (s *Server) setChatMenuButton(w http.ResponseWriter, method string, params url.Values) {
-	button := MenuButton{Type: "default"}
+	button := botapi.MenuButton{Type: "default"}
 	if raw := strings.TrimSpace(params.Get("menu_button")); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &button); err != nil {
 			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't parse menu button JSON object", 0)
@@ -151,7 +113,7 @@ func (s *Server) setChatMenuButton(w http.ResponseWriter, method string, params 
 	}
 	switch button.Type {
 	case "commands", "default":
-		button = MenuButton{Type: button.Type}
+		button = botapi.MenuButton{Type: button.Type}
 	case "web_app":
 		if strings.TrimSpace(button.Text) == "" {
 			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: menu button text is empty", 0)
@@ -161,7 +123,7 @@ func (s *Server) setChatMenuButton(w http.ResponseWriter, method string, params 
 			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: menu button Web App URL '' is invalid", 0)
 			return
 		}
-		if problem := webAppURLProblem(button.WebApp.URL); problem != "" {
+		if problem := webapp.URLProblem(button.WebApp.URL); problem != "" {
 			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: menu button "+problem, 0)
 			return
 		}
@@ -244,7 +206,7 @@ func (s *Server) LaunchWebApp(req WebAppLaunch) (LaunchedWebApp, error) {
 		}
 		app = menu.WebApp.URL
 	}
-	if problem := webAppURLProblem(app); problem != "" {
+	if problem := webapp.URLProblem(app); problem != "" {
 		return LaunchedWebApp{}, errors.New(problem)
 	}
 	in := IncomingMessage{ChatID: req.ChatID, UserID: req.UserID, Username: req.Username, FirstName: req.FirstName, Text: "-"}
@@ -266,22 +228,22 @@ func (s *Server) LaunchWebApp(req WebAppLaunch) (LaunchedWebApp, error) {
 	if req.StartParam != "" {
 		data.Set("start_param", req.StartParam)
 	}
-	data.Set("hash", signInitData(token, data))
+	data.Set("hash", webapp.Sign(token, data))
 	initData := data.Encode()
 
 	scheme := strings.ToLower(strings.TrimSpace(req.ColorScheme))
 	if scheme != "light" {
-		scheme = defaultColorScheme
+		scheme = webapp.DefaultColorScheme
 	}
-	theme := ThemeParams(scheme)
+	theme := webapp.ThemeParams(scheme)
 	themeJSON, _ := json.Marshal(theme)
 	version := strings.TrimSpace(req.Version)
 	if version == "" {
-		version = webAppVersion
+		version = webapp.Version
 	}
 	platform := strings.TrimSpace(req.Platform)
 	if platform == "" {
-		platform = webAppPlatform
+		platform = webapp.Platform
 	}
 	launch := url.Values{}
 	launch.Set("tgWebAppData", initData)
@@ -300,68 +262,10 @@ func (s *Server) LaunchWebApp(req WebAppLaunch) (LaunchedWebApp, error) {
 		app = u.String()
 	}
 	return LaunchedWebApp{
-		URL:         appendLaunchParams(app, launch.Encode()),
+		URL:         webapp.AppendLaunchParams(app, launch.Encode()),
 		InitData:    initData,
 		ThemeParams: theme,
 		Version:     version,
 		Platform:    platform,
 	}, nil
-}
-
-// appendLaunchParams puts the encoded launch parameters into the fragment of
-// app: the whole fragment when it has none, behind "?" after a fragment of
-// its own, behind "&" after one that already carries a query.
-func appendLaunchParams(app, params string) string {
-	base, frag, ok := strings.Cut(app, "#")
-	switch {
-	case !ok || frag == "":
-		return base + "#" + params
-	case strings.Contains(frag, "?"):
-		return app + "&" + params
-	default:
-		return app + "?" + params
-	}
-}
-
-// signInitData is the hash Telegram puts into launch data: the hex
-// HMAC-SHA256 of the data-check-string (every field but hash, sorted by key,
-// as key=value lines) under the HMAC-SHA256 of the token keyed "WebAppData".
-func signInitData(token string, data url.Values) string {
-	keys := make([]string, 0, len(data))
-	for k := range data {
-		if k != "hash" {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	lines := make([]string, 0, len(keys))
-	for _, k := range keys {
-		lines = append(lines, k+"="+data.Get(k))
-	}
-	secret := hmac.New(sha256.New, []byte("WebAppData"))
-	secret.Write([]byte(token))
-	mac := hmac.New(sha256.New, secret.Sum(nil))
-	mac.Write([]byte(strings.Join(lines, "\n")))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-// ThemeParams are the colours a Telegram client hands a Mini App
-// (tgWebAppThemeParams and theme_changed) for its light or dark theme.
-func ThemeParams(scheme string) map[string]string {
-	if scheme == "light" {
-		return map[string]string{
-			"bg_color": "#ffffff", "secondary_bg_color": "#efeff3", "section_bg_color": "#ffffff",
-			"header_bg_color": "#ffffff", "bottom_bar_bg_color": "#ffffff",
-			"text_color": "#000000", "hint_color": "#999999", "subtitle_text_color": "#999999",
-			"section_header_text_color": "#6d6d72", "link_color": "#2481cc", "accent_text_color": "#2481cc",
-			"button_color": "#2481cc", "button_text_color": "#ffffff", "destructive_text_color": "#ff3b30",
-		}
-	}
-	return map[string]string{
-		"bg_color": "#212121", "secondary_bg_color": "#0f0f0f", "section_bg_color": "#212121",
-		"header_bg_color": "#212121", "bottom_bar_bg_color": "#212121",
-		"text_color": "#ffffff", "hint_color": "#aaaaaa", "subtitle_text_color": "#aaaaaa",
-		"section_header_text_color": "#8774e1", "link_color": "#8774e1", "accent_text_color": "#8774e1",
-		"button_color": "#8774e1", "button_text_color": "#ffffff", "destructive_text_color": "#ff595a",
-	}
 }

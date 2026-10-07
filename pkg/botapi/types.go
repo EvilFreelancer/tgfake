@@ -1,9 +1,9 @@
-package tgfake
-
-// The wire shapes of the Bot API objects a bot sends and reads. They
-// are written here rather than borrowed from a Telegram library so that the
-// fake stays free of build tags and of the library's opinions: any client
-// that speaks the Bot API can point at it.
+// Package botapi holds the wire shapes of the Telegram Bot API objects the
+// tgfake server sends and reads. They are written here rather than borrowed
+// from a Telegram library so that the server stays free of the library's
+// opinions and dependencies: any client that speaks the Bot API can point at
+// it, and a test can decode what the server answers with these types.
+package botapi
 
 // User mirrors the Bot API User object.
 type User struct {
@@ -117,18 +117,4 @@ type Update struct {
 type BotCommand struct {
 	Command     string `json:"command"`
 	Description string `json:"description"`
-}
-
-// apiResponse is the envelope every Bot API method answers with.
-type apiResponse struct {
-	OK          bool            `json:"ok"`
-	Result      any             `json:"result,omitempty"`
-	ErrorCode   int             `json:"error_code,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Parameters  *responseParams `json:"parameters,omitempty"`
-}
-
-// responseParams carries retry_after on a 429.
-type responseParams struct {
-	RetryAfter int `json:"retry_after,omitempty"`
 }

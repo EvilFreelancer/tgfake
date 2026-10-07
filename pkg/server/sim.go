@@ -1,10 +1,12 @@
-package tgfake
+package server
 
 import (
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/EvilFreelancer/tgfake/pkg/webapp"
 )
 
 // The simulation API is the other side of the fake: where the person in the
@@ -159,7 +161,7 @@ func (s *Server) simWebAppTheme(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "scheme is light or dark"})
 		return
 	}
-	writeJSON(w, http.StatusOK, ThemeParams(scheme))
+	writeJSON(w, http.StatusOK, webapp.ThemeParams(scheme))
 }
 
 func (s *Server) simFault(w http.ResponseWriter, r *http.Request) {

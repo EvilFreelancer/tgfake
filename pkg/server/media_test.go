@@ -1,4 +1,4 @@
-package tgfake
+package server
 
 import (
 	"bytes"

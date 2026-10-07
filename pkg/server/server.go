@@ -1,4 +1,4 @@
-// Package tgfake is a stand-in for the Telegram Bot API: an HTTP server that
+// Package server is the tgfake server, a stand-in for the Telegram Bot API: an HTTP server that
 // answers the methods a bot calls, keeps the chats it is sent, and hands out
 // the updates an operator or a test injects. It speaks the wire format only -
 // urlencoded forms, JSON or multipart in, {"ok":true,"result":...} out - so
@@ -11,7 +11,7 @@
 // command needs its bot_command entity, an edit that changes nothing is
 // refused the way api.telegram.org refuses it, and a fault can be scheduled
 // for any method.
-package tgfake
+package server
 
 import (
 	"encoding/json"
@@ -21,6 +21,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/EvilFreelancer/tgfake/internal/chatpage"
+	"github.com/EvilFreelancer/tgfake/pkg/botapi"
 )
 
 // Options configures a Server.
@@ -86,7 +89,7 @@ type Server struct {
 
 	mu         sync.Mutex
 	nextUpdate int
-	pending    []Update
+	pending    []botapi.Update
 	allowed    []string // update kinds delivered; nil = every kind
 	wake       chan struct{}
 	closing    chan struct{}
@@ -94,7 +97,7 @@ type Server struct {
 	chats      map[int64]*chatState
 	calls      []Call
 	faults     map[string]*Fault
-	commands   []BotCommand
+	commands   []botapi.BotCommand
 	nextCbq    int
 	cbqChat    map[string]int64 // callback query id → chat the tap came from
 	files      map[string]*storedFile
@@ -104,9 +107,9 @@ type Server struct {
 	// token is the one in the path of the latest Bot API call: what launch
 	// data is signed with when Options.Token is not set.
 	token       string
-	defaultMenu *MenuButton           // the bot's menu button; nil shows its commands
-	chatMenus   map[int64]*MenuButton // private chats' own menu buttons
-	nextQuery   int                   // numbers the query_id of Mini App launches
+	defaultMenu *botapi.MenuButton           // the bot's menu button; nil shows its commands
+	chatMenus   map[int64]*botapi.MenuButton // private chats' own menu buttons
+	nextQuery   int                          // numbers the query_id of Mini App launches
 }
 
 // New returns a Server with nothing in it.
@@ -134,7 +137,7 @@ func New(opts Options) *Server {
 		cbqChat:    map[string]int64{},
 		files:      map[string]*storedFile{},
 		now:        time.Now,
-		chatMenus:  map[int64]*MenuButton{},
+		chatMenus:  map[int64]*botapi.MenuButton{},
 	}
 }
 
@@ -143,7 +146,7 @@ func New(opts Options) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerSim(mux)
-	mux.HandleFunc("/{$}", s.servePage)
+	mux.HandleFunc("/{$}", chatpage.Serve)
 	mux.HandleFunc("/", s.serveBotAPI)
 	return mux
 }
@@ -175,7 +178,7 @@ func (s *Server) Reset() {
 	s.files = map[string]*storedFile{}
 	s.nextFileID = 0
 	s.defaultMenu = nil
-	s.chatMenus = map[int64]*MenuButton{}
+	s.chatMenus = map[int64]*botapi.MenuButton{}
 	s.wakeLocked()
 }
 
@@ -242,10 +245,10 @@ func (s *Server) WaitCall(method string, n int, timeout time.Duration) bool {
 }
 
 // Commands returns what the bot last registered with setMyCommands.
-func (s *Server) Commands() []BotCommand {
+func (s *Server) Commands() []botapi.BotCommand {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]BotCommand(nil), s.commands...)
+	return append([]botapi.BotCommand(nil), s.commands...)
 }
 
 // record appends a call to the outbox. Caller holds s.mu.

@@ -24,8 +24,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/EvilFreelancer/tgfake"
-	"github.com/EvilFreelancer/tgfake/llmstub"
+	"github.com/EvilFreelancer/tgfake/pkg/llmstub"
+	"github.com/EvilFreelancer/tgfake/pkg/server"
 )
 
 // version is set at link time by the release build (-X main.version=...).
@@ -50,8 +50,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "127.0.0.1:18790", "address to listen on; port 0 picks a free one")
 	token := fs.String("token", "", "the only bot token accepted; empty accepts any")
-	botUsername := fs.String("bot-username", tgfake.DefaultBotUsername, "username getMe reports")
-	botName := fs.String("bot-name", tgfake.DefaultBotFirstName, "the bot's first name, as getMe and its messages report it")
+	botUsername := fs.String("bot-username", server.DefaultBotUsername, "username getMe reports")
+	botName := fs.String("bot-name", server.DefaultBotFirstName, "the bot's first name, as getMe and its messages report it")
 	pollMax := fs.Duration("poll-max", 30*time.Second, "longest a getUpdates request is held open")
 	verbose := fs.Bool("verbose", false, "print every Bot API call")
 	showVersion := fs.Bool("version", false, "print the version and exit")
@@ -72,7 +72,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	opts := tgfake.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax}
+	opts := server.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax}
 	if *verbose {
 		opts.Logf = log.New(stderr, "", log.LstdFlags).Printf
 	}
@@ -88,7 +88,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	fake := tgfake.New(opts)
+	fake := server.New(opts)
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func currentVersion() string {
 }
 
 // newMux mounts the fake and, when given, the scripted model.
-func newMux(fake *tgfake.Server, stub *llmstub.Server) http.Handler {
+func newMux(fake *server.Server, stub *llmstub.Server) http.Handler {
 	if stub == nil {
 		return fake.Handler()
 	}

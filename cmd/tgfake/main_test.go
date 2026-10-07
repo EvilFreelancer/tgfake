@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EvilFreelancer/tgfake"
-	"github.com/EvilFreelancer/tgfake/llmstub"
+	"github.com/EvilFreelancer/tgfake/pkg/llmstub"
+	"github.com/EvilFreelancer/tgfake/pkg/server"
 )
 
 func TestNewMux_ServesFakeAndModel(t *testing.T) {
-	fake := tgfake.New(tgfake.Options{MaxPollWait: 100 * time.Millisecond})
+	fake := server.New(server.Options{MaxPollWait: 100 * time.Millisecond})
 	srv := httptest.NewServer(newMux(fake, &llmstub.Server{}))
 	defer func() {
 		fake.Close()
