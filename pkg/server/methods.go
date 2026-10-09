@@ -514,6 +514,11 @@ func (s *Server) sendRichMessage(w http.ResponseWriter, method string, params ur
 	if body == "" {
 		body = in.HTML
 	}
+	markup, problem := s.keyboardFor(chatID, params)
+	if problem != "" {
+		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
+		return
+	}
 	s.mu.Lock()
 	chat := s.ensureChatLocked(chatID, "", "", nil)
 	quoted, problem := replyTargetLocked(chat, params)
@@ -522,7 +527,14 @@ func (s *Server) sendRichMessage(w http.ResponseWriter, method string, params ur
 		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
 	}
-	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Text: body, ReplyToMessage: quoted}
+	msg := &botapi.Message{
+		From:           s.botUser(),
+		Chat:           chat.wire(),
+		Date:           s.now().Unix(),
+		Text:           body,
+		ReplyToMessage: quoted,
+		ReplyMarkup:    markup,
+	}
 	stored := chat.appendLocked(msg, true, "", true)
 	result := stored.clone()
 	s.mu.Unlock()

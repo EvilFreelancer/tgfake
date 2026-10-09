@@ -60,7 +60,7 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `deleteMessage` | `chat_id`, `message_id` | `true`. |
 | `sendChatAction` | `chat_id` (`action` is recorded, not read) | `true`. The chat shows "typing…" for 5 seconds. |
 | `answerCallbackQuery` | `callback_query_id`, `text`, `show_alert` | `true`. The answer is kept in the chat's `callbacks`. |
-| `sendRichMessage` | `chat_id`, `rich_message` (`{"markdown": ...}` or `{"html": ...}`), the reply parameters | The sent `Message`; its `text` is the markdown, else the HTML. |
+| `sendRichMessage` | `chat_id`, `rich_message` (`{"markdown": ...}` or `{"html": ...}`), `reply_markup`, the reply parameters | The sent `Message`; its `text` is the markdown, else the HTML. |
 | `sendRichMessageDraft` | `chat_id`, `draft_id`, `rich_message` | `true`. |
 | `setChatMenuButton` | `chat_id` (optional), `menu_button` | `true`; see [mini-apps.md](mini-apps.md#the-menu-button). |
 | `getChatMenuButton` | `chat_id` (optional) | The `MenuButton` the chat shows. |
@@ -92,7 +92,7 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Replies.** A send replies to a message named by `reply_parameters` (`{"message_id": N, "allow_sending_without_reply": true}`) or by the older `reply_to_message_id` with `allow_sending_without_reply=true`. The answer carries `reply_to_message`, the quoted message without its own quote. A reply to a message that is not in the chat, or was deleted, is refused unless `allow_sending_without_reply` is set, in which case the message goes out unthreaded.
 
-**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. `sendPhoto` and `sendDocument` keep an inline keyboard under the file, held to the same rules as a text message's; `sendRichMessage` does not read `reply_markup`. A button must have exactly one action: `callback_data`, `url` or `web_app`; `web_app` buttons are covered in [mini-apps.md](mini-apps.md).
+**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. `sendPhoto` and `sendDocument` keep an inline keyboard under the file and `sendRichMessage` under the rich message, held to the same rules as a text message's. A button must have exactly one action: `callback_data`, `url` or `web_app`; `web_app` buttons are covered in [mini-apps.md](mini-apps.md).
 
 **Edits.** Only the bot's own messages can be edited. `editMessageText` replaces the text and the keyboard (a call without `reply_markup` leaves the message with none) and records the new `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. An edit that changes neither the text nor the keyboard is refused. Two keyboards are the same when every button has the same text, `callback_data`, `url` and `web_app` address.
 
@@ -133,7 +133,7 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | `sendMessage`, `sendPhoto`, `sendDocument`, `editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `sendChatAction`, `sendRichMessage`, `sendRichMessageDraft` | `chat_id` is missing, zero or not an integer | `Bad Request: chat_id is empty` |
 | `sendMessage`, `editMessageText` | `text` is empty | `Bad Request: message text is empty` |
 | `sendMessage`, `editMessageText` | `text` is over 4096 characters | `Bad Request: message is too long` |
-| `sendMessage`, `sendPhoto`, `sendDocument`, `editMessageText`, `editMessageReplyMarkup` | `inline_keyboard` is not an array, `null` included: what a library sends for a keyboard built from no rows | `Bad Request: Field "inline_keyboard" must be of type Array` |
+| `sendMessage`, `sendPhoto`, `sendDocument`, `sendRichMessage`, `editMessageText`, `editMessageReplyMarkup` | `inline_keyboard` is not an array, `null` included: what a library sends for a keyboard built from no rows | `Bad Request: Field "inline_keyboard" must be of type Array` |
 | same | a button has no action, only `text` | `Bad Request: Text buttons are not allowed in the inline keyboard` |
 | same | a button has more than one of `callback_data`, `url` and `web_app` (stricter than Telegram, see above) | `Bad Request: BUTTON_TYPE_INVALID` |
 | same | `callback_data` is over 64 bytes | `Bad Request: BUTTON_DATA_INVALID` |
