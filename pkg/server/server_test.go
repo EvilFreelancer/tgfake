@@ -324,6 +324,37 @@ func TestRichMessageAndDraft(t *testing.T) {
 	}
 }
 
+func TestSendRichMessageCarriesItsKeyboard(t *testing.T) {
+	s := newStand(t, Options{})
+
+	status, body := s.call("sendRichMessage", url.Values{
+		"chat_id":      {"4242"},
+		"rich_message": {`{"markdown":"Allow?"}`},
+		"reply_markup": {`{"inline_keyboard":[[{"text":"Approve","callback_data":"approve"}]]}`},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("sendRichMessage: %d %v", status, body)
+	}
+	if markup, _ := result(t, body)["reply_markup"].(map[string]any); markup == nil {
+		t.Fatalf("the answer lost the keyboard: %v", body)
+	}
+
+	msgID, data, ok := s.fake.Chat(4242).FindButton("Approve")
+	if !ok || data != "approve" || msgID == 0 {
+		t.Fatalf("the chat shows no keyboard under the rich message:\n%s", s.fake.Chat(4242).Text())
+	}
+
+	tooLong := strings.Repeat("d", 65)
+	status, body = s.call("sendRichMessage", url.Values{
+		"chat_id":      {"4242"},
+		"rich_message": {`{"markdown":"menu"}`},
+		"reply_markup": {`{"inline_keyboard":[[{"text":"x","callback_data":"` + tooLong + `"}]]}`},
+	})
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: BUTTON_DATA_INVALID" {
+		t.Fatalf("a rich message with 65 bytes of callback_data: %d %v", status, body)
+	}
+}
+
 func TestCommandsRoundTrip(t *testing.T) {
 	s := newStand(t, Options{})
 	status, _ := s.call("setMyCommands", url.Values{"commands": {`[{"command":"start","description":"Go"},{"command":"help","description":"Help"}]`}})
