@@ -569,6 +569,9 @@ func (s *Server) sendRichMessageDraft(w http.ResponseWriter, method string, para
 	d.markdown = in.Markdown
 	d.updatedAt = now
 	d.revisions++
+	d.threadID = atoi(params.Get("message_thread_id"))
+	d.canStop = params.Get("can_stop") == "true"
+	d.keepOnStop = params.Get("keep_on_stop") == "true"
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)
 }

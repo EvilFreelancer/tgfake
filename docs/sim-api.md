@@ -24,6 +24,7 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 |-----------------|--------------|
 | `POST /sim/message` | The person sends a text message. |
 | `POST /sim/callback` | The person taps an inline keyboard button. |
+| `POST /sim/draft/stop` | The person presses Stop under a streamed draft. |
 | `GET /sim/outbox` | Every Bot API call the stand answered, oldest first. |
 | `GET /sim/outbox/count` | How many Bot API calls the stand answered. |
 | `GET /sim/chat/{id}` | The transcript of a chat, as JSON or as text. |
@@ -108,6 +109,31 @@ curl -s -X POST $O/sim/callback -d '{"label": "Yes"}'
 {"callback_query_id":"cbq-1","update_id":2}
 ```
 
+## POST /sim/draft/stop
+
+The person presses the Stop button the bot put under a draft by streaming it with `can_stop=true`. The stand queues a `stopped_message_generation` update with the chat, the draft's `message_thread_id` when it had one, and its `draft_id`, provided the bot's `allowed_updates` subscription includes that kind at that moment ([bot-api.md](bot-api.md#getupdates)). The draft leaves the chat unless its latest revision set `keep_on_stop=true`; then it stays without the Stop button.
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `draft_id` | integer | the newest live draft of the chat that shows a Stop button | The draft whose Stop button is pressed. |
+| `chat_id` | integer | `4242` | The private chat of the draft. |
+
+A press that finds nothing to press is refused with `404` and one of these reasons:
+
+| Error | When |
+|-------|------|
+| `chat <id> has no draft with a Stop button` | No `draft_id` was given and no live draft of the chat shows the button. |
+| `draft <id> not found in chat <id>` | `draft_id` names a draft that is not there or has expired. |
+| `draft <id> in chat <id> shows no Stop button` | The draft's latest revision did not set `can_stop`. |
+
+```bash
+curl -s -X POST $O/sim/draft/stop -d '{"draft_id": -1}'
+```
+
+```json
+{"update_id":3}
+```
+
 ## GET /sim/outbox
 
 Every Bot API call that named a method, refused calls included, oldest first:
@@ -158,7 +184,7 @@ curl -s $O/sim/chat/4242
 | `chat_id`, `type`, `title` | The chat; `title` only for a group. |
 | `typing` | Whether "typing…" shows: a `sendChatAction` came less than 5 seconds ago. |
 | `messages` | Every message in order, deleted ones included. |
-| `drafts` | The rich-message drafts still alive, by `draft_id`: `draft_id`, `markdown`, `updated_at`, `revisions`. |
+| `drafts` | The rich-message drafts still alive, by `draft_id`: `draft_id`, `markdown`, `updated_at`, `revisions`, and `can_stop` and `keep_on_stop` when the latest revision set them. |
 | `callbacks` | Every `answerCallbackQuery` for a tap in this chat: `id`, `text`, `show_alert`. |
 | `menu_button` | The menu button the chat shows: its own, else the bot's ([mini-apps.md](mini-apps.md#the-menu-button)). |
 
@@ -188,7 +214,7 @@ typing…
 - A photo is shown as `[photo <file name> <width>x<height>]` and a document as `[document <file name>]`, each followed by its caption when it has one.
 - The lines after the first of a multi-line text or caption are indented by four spaces.
 - Each row of a message's inline keyboard follows it on a line of its own: four spaces, then `[<button text>]` for each button, separated by spaces.
-- After the messages comes one line per live draft, `draft <draft_id> (rev <revisions>): <markdown>`.
+- After the messages comes one line per live draft, `draft <draft_id> (rev <revisions>): <markdown>`, followed by a line `    [Stop]` when the draft shows a Stop button.
 - The last line is `typing…` while the chat shows typing.
 
 ## GET /sim/file/{id}

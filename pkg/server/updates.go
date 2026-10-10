@@ -180,6 +180,78 @@ func (s *Server) InjectCallback(in IncomingCallback) (updateID int, callbackID s
 	return upd, id, nil
 }
 
+// DraftStop is a tap on the Stop button under a streamed draft. A zero
+// DraftID stops the newest live draft that shows the button; a zero ChatID is
+// the default user's private chat.
+type DraftStop struct {
+	ChatID  int64 `json:"chat_id,omitempty"`
+	DraftID int64 `json:"draft_id,omitempty"`
+}
+
+// StopDraft presses Stop under a draft the bot streamed with can_stop and
+// queues the stopped_message_generation update Telegram sends for it. The
+// preview leaves the chat unless its latest revision asked for keep_on_stop.
+func (s *Server) StopDraft(in DraftStop) (updateID int, err error) {
+	if in.ChatID == 0 {
+		in.ChatID = defaultUserID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	target, err := s.draftToStopLocked(in)
+	if err != nil {
+		return 0, err
+	}
+
+	chat := s.chats[in.ChatID]
+	if target.keepOnStop {
+		target.canStop = false
+	} else {
+		delete(chat.drafts, target.id)
+	}
+	return s.pushUpdateLocked(botapi.Update{StoppedMessageGeneration: &botapi.MessageGenerationStopped{
+		Chat:            chat.wire(),
+		MessageThreadID: target.threadID,
+		DraftID:         target.id,
+	}}), nil
+}
+
+// draftToStopLocked finds the live draft a Stop press is for: the one
+// in.DraftID names, else the newest one that shows the button.
+func (s *Server) draftToStopLocked(in DraftStop) (*draft, error) {
+	var drafts map[int64]*draft
+	if chat := s.chats[in.ChatID]; chat != nil {
+		chat.expireDraftsLocked(s.now())
+		drafts = chat.drafts
+	}
+
+	if in.DraftID != 0 {
+		d := drafts[in.DraftID]
+		if d == nil {
+			return nil, fmt.Errorf("draft %d not found in chat %d", in.DraftID, in.ChatID)
+		}
+		if !d.canStop {
+			return nil, fmt.Errorf("draft %d in chat %d shows no Stop button", in.DraftID, in.ChatID)
+		}
+		return d, nil
+	}
+
+	var newest *draft
+	for _, d := range drafts {
+		if !d.canStop {
+			continue
+		}
+		if newest == nil || d.updatedAt.After(newest.updatedAt) ||
+			(d.updatedAt.Equal(newest.updatedAt) && d.id > newest.id) {
+			newest = d
+		}
+	}
+	if newest == nil {
+		return nil, fmt.Errorf("chat %d has no draft with a Stop button", in.ChatID)
+	}
+	return newest, nil
+}
+
 // pushUpdateLocked numbers an update and queues it only if the subscription
 // in force at creation includes its kind. Later polls cannot recover an
 // excluded update or discard one that was already queued.
@@ -207,6 +279,8 @@ func updateKind(u botapi.Update) string {
 	switch {
 	case u.CallbackQuery != nil:
 		return "callback_query"
+	case u.StoppedMessageGeneration != nil:
+		return "stopped_message_generation"
 	default:
 		return "message"
 	}

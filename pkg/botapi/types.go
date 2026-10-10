@@ -105,12 +105,22 @@ type CallbackQuery struct {
 	Data         string   `json:"data,omitempty"`
 }
 
-// Update is one item of a getUpdates answer. The fake produces messages and
-// callback queries, the two kinds the stand delivers.
+// MessageGenerationStopped is what a tap on the Stop button of a streamed
+// draft delivers (Bot API 10.3): the chat, the topic and the draft. It names
+// no user; the chat is the person's private chat.
+type MessageGenerationStopped struct {
+	Chat            Chat  `json:"chat"`
+	MessageThreadID int   `json:"message_thread_id,omitempty"`
+	DraftID         int64 `json:"draft_id"`
+}
+
+// Update is one item of a getUpdates answer. The fake produces messages,
+// callback queries and stopped drafts, the kinds the stand delivers.
 type Update struct {
-	UpdateID      int            `json:"update_id"`
-	Message       *Message       `json:"message,omitempty"`
-	CallbackQuery *CallbackQuery `json:"callback_query,omitempty"`
+	UpdateID                 int                       `json:"update_id"`
+	Message                  *Message                  `json:"message,omitempty"`
+	CallbackQuery            *CallbackQuery            `json:"callback_query,omitempty"`
+	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation,omitempty"`
 }
 
 // BotCommand is one entry of setMyCommands.

@@ -37,10 +37,13 @@ type storedMessage struct {
 }
 
 type draft struct {
-	id        int64
-	markdown  string
-	updatedAt time.Time
-	revisions int
+	id         int64
+	threadID   int
+	markdown   string
+	updatedAt  time.Time
+	revisions  int
+	canStop    bool
+	keepOnStop bool
 }
 
 // CallbackAnswer is one answerCallbackQuery the bot issued.
@@ -217,10 +220,12 @@ type FileView struct {
 // DraftView is one rich-message draft of a ChatView: Telegram shows only the
 // latest revision, so does the fake, with a count of how many it received.
 type DraftView struct {
-	DraftID   int64     `json:"draft_id"`
-	Markdown  string    `json:"markdown"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Revisions int       `json:"revisions"`
+	DraftID    int64     `json:"draft_id"`
+	Markdown   string    `json:"markdown"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Revisions  int       `json:"revisions"`
+	CanStop    bool      `json:"can_stop,omitempty"`
+	KeepOnStop bool      `json:"keep_on_stop,omitempty"`
 }
 
 // typingWindow is how long Telegram shows "typing…" after one chat action.
@@ -306,7 +311,14 @@ func (c *chatState) view(now time.Time) ChatView {
 		v.Messages = append(v.Messages, mv)
 	}
 	for _, d := range c.drafts {
-		v.Drafts = append(v.Drafts, DraftView{DraftID: d.id, Markdown: d.markdown, UpdatedAt: d.updatedAt, Revisions: d.revisions})
+		v.Drafts = append(v.Drafts, DraftView{
+			DraftID:    d.id,
+			Markdown:   d.markdown,
+			UpdatedAt:  d.updatedAt,
+			Revisions:  d.revisions,
+			CanStop:    d.canStop,
+			KeepOnStop: d.keepOnStop,
+		})
 	}
 	sort.Slice(v.Drafts, func(i, j int) bool { return v.Drafts[i].DraftID < v.Drafts[j].DraftID })
 	return v
@@ -374,6 +386,9 @@ func (v ChatView) Text() string {
 	}
 	for _, d := range v.Drafts {
 		sb.WriteString("draft " + itoa(int(d.DraftID)) + " (rev " + itoa(d.Revisions) + "): " + strings.ReplaceAll(d.Markdown, "\n", "\n    ") + "\n")
+		if d.CanStop {
+			sb.WriteString("    [Stop]\n")
+		}
 	}
 	if v.Typing {
 		sb.WriteString("typing…\n")

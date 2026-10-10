@@ -14,3 +14,10 @@ Feature: The offline Telegram stand preserves update and preview lifetimes
     Then the chat shows 1 rich preview
     When 30 seconds pass without a new revision
     Then the chat shows 0 rich previews
+
+  Scenario: The person stops a streamed draft
+    Given an offline Telegram stand
+    When the bot streams a rich preview with a Stop button
+    And the person presses Stop under it
+    Then the bot's next poll carries the stopped draft
+    And the chat shows 0 rich previews

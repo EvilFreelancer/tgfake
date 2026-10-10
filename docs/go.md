@@ -42,9 +42,10 @@ t.Cleanup(func() {
 |--------|--------------|
 | `InjectMessage(in IncomingMessage) (updateID, messageID int)` | The person sends a message; it is stored in the chat and queued as the next update. |
 | `InjectCallback(in IncomingCallback) (updateID int, callbackID string, err error)` | The person taps a button, by `Label` or by `Data`; an error says why nothing could be tapped. |
+| `StopDraft(in DraftStop) (updateID int, err error)` | The person presses Stop under a draft streamed with `can_stop`; an error says why nothing could be stopped. |
 | `LaunchWebApp(req WebAppLaunch) (LaunchedWebApp, error)` | The person opens a Mini App; the answer is the launch address and the signed launch data. |
 
-`IncomingMessage`, `IncomingCallback` and `WebAppLaunch` are the request bodies of `POST /sim/message`, `POST /sim/callback` and `POST /sim/webapp/launch`, with the same fields and defaults: zero fields mean user 4242 `alice` in her private chat 4242. The fields are listed in [sim-api.md](sim-api.md#post-simmessage) and [mini-apps.md](mini-apps.md#launches). The default user's id is not exported; tests write `4242`.
+`IncomingMessage`, `IncomingCallback`, `DraftStop` and `WebAppLaunch` are the request bodies of `POST /sim/message`, `POST /sim/callback`, `POST /sim/draft/stop` and `POST /sim/webapp/launch`, with the same fields and defaults: zero fields mean user 4242 `alice` in her private chat 4242. The fields are listed in [sim-api.md](sim-api.md#post-simmessage) and [mini-apps.md](mini-apps.md#launches). The default user's id is not exported; tests write `4242`.
 
 ### Reading what the bot did
 
@@ -93,7 +94,7 @@ fake.SetFault(server.Fault{Method: "sendMessage", Code: 429, RetryAfter: 1, Time
 
 ### Exported names
 
-The constants `DefaultBotUsername`, `DefaultBotFirstName` and `DefaultBotID` are the bot a stand with no options plays. The types are `Server`, `Options`, `Call`, `CallbackAnswer`, `ChatSummary`, `ChatView`, `DraftView`, `Fault`, `FileView`, `IncomingCallback`, `IncomingMessage`, `LaunchedWebApp`, `MessageView` and `WebAppLaunch`.
+The constants `DefaultBotUsername`, `DefaultBotFirstName` and `DefaultBotID` are the bot a stand with no options plays. The types are `Server`, `Options`, `Call`, `CallbackAnswer`, `ChatSummary`, `ChatView`, `DraftStop`, `DraftView`, `Fault`, `FileView`, `IncomingCallback`, `IncomingMessage`, `LaunchedWebApp`, `MessageView` and `WebAppLaunch`.
 
 ### A complete test
 
