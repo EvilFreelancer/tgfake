@@ -97,10 +97,11 @@ export default async function(input, ctx) {
    if (!(e instanceof BotApiError)) throw e;
    error = {code:e.code, description:e.description, method:e.method};
  }
- await api.sendDocument({chat_id:4242,document:new InputFile(new TextEncoder().encode('report'),'report.txt')});
+ const sent = await api.sendDocument({chat_id:4242,document:new InputFile(new TextEncoder().encode('report'),'report.txt')});
+ const downloaded = new TextDecoder().decode(await api.getFileContent(sent.document.file_id));
  await db.delete(users).where(eq(users.id,row.id)).returning().run();
  console.info('received', ctx.update.update_id);
- return {raw:raw.name, arrays, count:projected.n, remaining:await db.$count(users), error};
+ return {raw:raw.name, arrays, count:projected.n, remaining:await db.$count(users), error, downloaded};
 }`,
 	})
 	r, fake := newRuntime(t, project)
@@ -116,7 +117,7 @@ export default async function(input, ctx) {
 	if err := json.Unmarshal(result.Value, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["raw"] != "Ann" || body["count"] != float64(1) || body["remaining"] != float64(0) {
+	if body["raw"] != "Ann" || body["count"] != float64(1) || body["remaining"] != float64(0) || body["downloaded"] != "report" {
 		t.Fatalf("database result: %s", result.Value)
 	}
 	apiError := body["error"].(map[string]any)

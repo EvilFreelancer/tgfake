@@ -55,6 +55,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	botName := fs.String("bot-name", server.DefaultBotFirstName, "the bot's first name, as getMe and its messages report it")
 	pollMax := fs.Duration("poll-max", 30*time.Second, "longest a getUpdates request is held open")
 	verbose := fs.Bool("verbose", false, "print every Bot API call")
+	inlineMode := fs.Bool("inline", false, "enable the bot's inline mode, as in BotFather")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	project := fs.String("serverless", "", "local project containing tgcloud/; run JavaScript in Docker")
 	dockerImage := fs.String("serverless-image", serverless.DefaultDockerImage, "Docker image providing Node.js and node:sqlite; pull it first")
@@ -105,7 +106,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		*token = "123456:SERVERLESS"
 	}
 
-	opts := server.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax}
+	opts := server.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax, InlineMode: *inlineMode}
 	if *verbose {
 		opts.Logf = log.New(stderr, "", log.LstdFlags).Printf
 	}

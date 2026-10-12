@@ -46,6 +46,24 @@ Modules are loaded as a snapshot at startup. Restart tgfake after editing them. 
 
 The runtime uses `getUpdates` internally. Do not start a second poller for the same stand. Handler exceptions are logged and the update is consumed; a polling transport error stops the command. Each invocation, including container startup, has a 10-second timeout, configurable with `--serverless-timeout`. Invocations are serialized, and global JavaScript state is fresh each time.
 
+## Testing files, inline bots and Mini Apps
+
+The example also downloads incoming documents and answers inline queries. Start it with `--inline`, then inject a file or query:
+
+```bash
+tgfake --serverless examples/serverless --serverless-migrate --inline
+curl -sf -X POST http://127.0.0.1:18790/sim/media \
+  -d '{"type":"document","file_name":"hello.txt","data":"aGVsbG8="}'
+curl -sf -X POST http://127.0.0.1:18790/sim/inline -d '{"query":"hello"}'
+curl -sf http://127.0.0.1:18790/sim/inline
+```
+
+Wait for the document reply or inline answer. Select a returned result with `/sim/inline/choose` using its query and result ids. A `handlers/chosen_inline_result.js` receives the selection. The chat page's Inline button drives the same flow.
+
+For Mini Apps, `/sim/webapp/launch` issues signed data and a query id for `api.answerWebAppQuery`. `/sim/webapp/data` injects a `message.web_app_data` service message, and `/sim/webapp/share` shares a result saved with `api.savePreparedInlineMessage`. See [sim-api.md](sim-api.md) for bodies and [bot-api.md](bot-api.md) for supported result types and remaining limits.
+
+The internal Serverless poller cannot run with an active webhook. Use `setWebhook` for an external bot receiver in a separate stand; otherwise `getUpdates` returns 409 and the Serverless command stops on the transport error.
+
 ## SDK
 
 ```javascript
@@ -54,7 +72,7 @@ import { table, integer, text, eq, sql } from 'sdk/db';
 ```
 
 - `api.<method>(params)` and `api.call(method, params)` call the configured Bot API origin. `BotApiError` carries `code`, `description`, `method`, and `parameters`, including injected `retry_after`. `InputFile` supports top-level uploads and `attach://` references nested in parameters. The available methods and refusals remain those of [bot-api.md](bot-api.md).
-- `api.getFileContent(file_id)` and `api.getFileStream(file_id)` use `getFile` and its download path, with a 20 MiB limit. tgfake currently does not implement `getFile`, so these helpers require a Go runtime configured with another origin which does. The stream has an async iterator and `bytes()`.
+- `api.getFileContent(file_id)` and `api.getFileStream(file_id)` use the stand's `getFile` and authenticated download path, with a 20 MiB limit. Uploaded and simulated incoming files are available. The stream has an async iterator and `bytes()`.
 - `fetch` supports HTTP(S), request methods, headers, JSON/form/text body helpers, raw bytes, `InputFile`, and `FormData` uploads. Responses expose status, URL, headers, `text()`, `json()`, and an async iterator over `body`. The response limit is 30 MiB, including streamed responses. HTTP and Bot API requests go through the host over stdin/stdout, so loopback services, including `--llm`, are reachable without Docker host networking. Request options beyond method, headers and body are not emulated.
 - `console.log/debug/info/warn/error/trace` are captured with their level and printed to stderr by the command. Console text is limited to 1 MiB per invocation; results are limited to 8 MiB.
 

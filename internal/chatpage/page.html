@@ -64,7 +64,12 @@
     <label>mention bot <input id="mention" type="checkbox" style="width:auto"></label>
   </form>
   <div id="log"></div>
+<div id="inlinePanel" hidden>
+  <form class="send" id="inlineForm"><input id="inlineText" placeholder="inline query"><button>Search</button><button type="button" id="inlineClose">Close</button></form>
+  <div id="inlineResults"></div>
+</div>
   <form class="send" id="sendForm">
+  <button type="button" id="inlineButton" hidden>Inline</button>
     <button type="button" id="menuButton" hidden title="The bot's menu button opens its Mini App"></button>
     <input id="text" placeholder="message or /command" autocomplete="off" autofocus>
     <button>Send</button>
@@ -111,6 +116,7 @@
   const $ = (id) => document.getElementById(id);
   const num = (id) => Number($(id).value) || 0;
   let lastSeq = 0;
+  let inlineID = '';
 
   async function post(path, body) {
     const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -129,6 +135,36 @@
   });
   $('reset').addEventListener('click', async () => { await post('/sim/reset', {}); lastSeq = 0; $('outbox').textContent = ''; refreshChat(); });
   $('showPolls').addEventListener('change', () => { lastSeq = 0; $('outbox').textContent = ''; refreshOutbox(); });
+  $('inlineButton').addEventListener('click', () => { $('inlinePanel').hidden = false; $('inlineText').focus(); });
+  $('inlineClose').addEventListener('click', () => { $('inlinePanel').hidden = true; inlineID = ''; });
+  $('inlineForm').addEventListener('submit', async (ev) => { ev.preventDefault(); await startInline($('inlineText').value); });
+
+  async function startInline(query) {
+    const r = await post('/sim/inline', { user_id: num('user'), username: $('username').value, query, chat_type: $('ctype').value });
+    if (!r.ok) return;
+    inlineID = (await r.json()).inline_query_id;
+    $('inlineText').value = query;
+    $('inlinePanel').hidden = false;
+    $('inlineResults').textContent = 'Waiting for the bot...';
+  }
+
+  async function refreshInline() {
+    if (!inlineID) return;
+    const data = await (await fetch('/sim/inline')).json();
+    const query = data.queries.find((q) => q.query.id === inlineID);
+    if (!query || !query.answered) return;
+    const results = $('inlineResults');
+    results.textContent = query.results.length ? '' : 'No results';
+    for (const result of query.results) {
+      const btn = el('button', '', result.title || result.caption || result.id);
+      btn.type = 'button';
+      btn.addEventListener('click', async () => {
+        const r = await post('/sim/inline/choose', { inline_query_id: inlineID, result_id: result.id, chat_id: num('chat'), chat_type: $('ctype').value });
+        if (r.ok) { inlineID = ''; $('inlinePanel').hidden = true; refreshChat(); }
+      });
+      results.appendChild(btn);
+    }
+  }
 
   function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
@@ -157,6 +193,19 @@
       if (m.document) {
         box.appendChild(el('div', '', '[document ' + m.document.name + ']'));
       }
+      for (const kind of ['video', 'animation', 'audio', 'voice', 'video_note']) {
+        if (!m[kind]) continue;
+        const media = el(kind === 'audio' || kind === 'voice' ? 'audio' : 'video');
+        media.controls = true;
+        media.src = '/sim/file/' + encodeURIComponent(m[kind].file_id);
+        media.style.cssText = 'max-width:240px;display:block;margin:4px 0';
+        box.appendChild(el('div', '', '[' + kind + ' ' + m[kind].name + ']'));
+        box.appendChild(media);
+      }
+      if (m.venue) box.appendChild(el('div', '', '[venue ' + m.venue.title + '] ' + m.venue.address));
+      else if (m.location) box.appendChild(el('div', '', '[location ' + m.location.latitude + ', ' + m.location.longitude + ']'));
+      if (m.contact) box.appendChild(el('div', '', '[contact ' + m.contact.first_name + '] ' + m.contact.phone_number));
+      if (m.web_app_data) box.appendChild(el('div', '', '[web_app_data ' + m.web_app_data.button_text + '] ' + m.web_app_data.data));
       if (m.caption) {
         box.appendChild(el('div', '', m.caption));
       }
@@ -173,6 +222,9 @@
             btn.addEventListener('click', async () => {
               if (b.web_app) { miniApp.open(b.web_app.url); return; }
               if (b.url) { window.open(b.url, '_blank', 'noopener'); return; }
+              if (b.copy_text) { await navigator.clipboard.writeText(b.copy_text.text); return; }
+              const inlineQuery = b.switch_inline_query ?? b.switch_inline_query_current_chat;
+              if (inlineQuery !== undefined) { await startInline(inlineQuery); return; }
               await post('/sim/callback', { chat_id: chatID, user_id: num('user'), username: $('username').value, message_id: m.message_id, data: b.callback_data });
               refreshChat();
             });
@@ -209,6 +261,7 @@
     } else {
       mb.hidden = true;
     }
+    await refreshInline();
   }
 
   async function refreshOutbox() {
@@ -231,6 +284,7 @@
     }
     const st = await (await fetch('/sim/state')).json();
     botName = st.bot.username;
+    $('inlineButton').hidden = !st.bot.supports_inline_queries;
     $('state').textContent = '@' + st.bot.username + ' · pending ' + st.pending_updates + ' · faults ' + st.faults.length;
   }
 

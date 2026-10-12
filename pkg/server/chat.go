@@ -22,6 +22,8 @@ type chatState struct {
 	drafts    map[int64]*draft
 	lastTyped time.Time
 	callbacks []CallbackAnswer
+	info      map[string]any
+	members   map[int64]map[string]any
 }
 
 // storedMessage is a message plus what the transcript view wants to know
@@ -65,11 +67,14 @@ func (s *Server) ensureChatLocked(id int64, typ, title string, user *botapi.User
 				typ = "group"
 			}
 		}
-		c = &chatState{id: id, typ: typ, title: title, byID: map[int]*storedMessage{}, drafts: map[int64]*draft{}}
+		c = &chatState{id: id, typ: typ, title: title, byID: map[int]*storedMessage{}, drafts: map[int64]*draft{}, members: map[int64]map[string]any{s.opts.BotID: userMember(s.botUser())}, info: map[string]any{}}
 		s.chats[id] = c
 	}
 	if user != nil && c.typ == "private" {
 		c.user = user
+	}
+	if user != nil && c.members[user.ID] == nil {
+		c.members[user.ID] = userMember(user)
 	}
 	if title != "" && c.title == "" {
 		c.title = title
@@ -87,6 +92,7 @@ func (c *chatState) wire() botapi.Chat {
 		}
 	} else {
 		ch.Title = c.title
+		ch.Username = stringOf(c.info["username"])
 	}
 	return ch
 }
@@ -104,11 +110,24 @@ func (c *chatState) appendLocked(msg *botapi.Message, fromBot bool, parseMode st
 // clone returns a copy of the message as the wire carries it.
 func (m *storedMessage) clone() *botapi.Message {
 	out := m.msg
+	out.From = copyPointer(m.msg.From)
+	out.Video, out.Animation, out.Audio, out.Voice, out.VideoNote = copyPointer(m.msg.Video), copyPointer(m.msg.Animation), copyPointer(m.msg.Audio), copyPointer(m.msg.Voice), copyPointer(m.msg.VideoNote)
+	out.Location, out.Contact, out.Venue, out.WebAppData = copyPointer(m.msg.Location), copyPointer(m.msg.Contact), copyPointer(m.msg.Venue), copyPointer(m.msg.WebAppData)
+	out.ViaBot = copyPointer(m.msg.ViaBot)
+	out.ForwardOrigin = copyPointer(m.msg.ForwardOrigin)
+	if out.ForwardOrigin != nil {
+		out.ForwardOrigin.SenderUser = copyPointer(out.ForwardOrigin.SenderUser)
+		out.ForwardOrigin.SenderChat = copyPointer(out.ForwardOrigin.SenderChat)
+		out.ForwardOrigin.Chat = copyPointer(out.ForwardOrigin.Chat)
+	}
 	if m.msg.ReplyMarkup != nil {
 		kb := &botapi.InlineKeyboardMarkup{InlineKeyboard: make([][]botapi.InlineKeyboardButton, len(m.msg.ReplyMarkup.InlineKeyboard))}
 		for i, row := range m.msg.ReplyMarkup.InlineKeyboard {
 			kb.InlineKeyboard[i] = append([]botapi.InlineKeyboardButton(nil), row...)
 			for j := range kb.InlineKeyboard[i] {
+				kb.InlineKeyboard[i][j].SwitchInlineQuery = copyPointer(kb.InlineKeyboard[i][j].SwitchInlineQuery)
+				kb.InlineKeyboard[i][j].SwitchInlineQueryCurrentChat = copyPointer(kb.InlineKeyboard[i][j].SwitchInlineQueryCurrentChat)
+				kb.InlineKeyboard[i][j].CopyText = copyPointer(kb.InlineKeyboard[i][j].CopyText)
 				if app := kb.InlineKeyboard[i][j].WebApp; app != nil {
 					copied := *app
 					kb.InlineKeyboard[i][j].WebApp = &copied
@@ -128,6 +147,14 @@ func (m *storedMessage) clone() *botapi.Message {
 		out.Document = &d
 	}
 	return &out
+}
+
+func copyPointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 // quoted is the shape a message takes inside reply_to_message: the message
@@ -199,6 +226,17 @@ type MessageView struct {
 	Caption          string                          `json:"caption,omitempty"`
 	Photo            *FileView                       `json:"photo,omitempty"`
 	Document         *FileView                       `json:"document,omitempty"`
+	Video            *FileView                       `json:"video,omitempty"`
+	Audio            *FileView                       `json:"audio,omitempty"`
+	Voice            *FileView                       `json:"voice,omitempty"`
+	Animation        *FileView                       `json:"animation,omitempty"`
+	VideoNote        *FileView                       `json:"video_note,omitempty"`
+	Location         *botapi.Location                `json:"location,omitempty"`
+	Venue            *botapi.Venue                   `json:"venue,omitempty"`
+	Contact          *botapi.Contact                 `json:"contact,omitempty"`
+	WebAppData       *botapi.WebAppData              `json:"web_app_data,omitempty"`
+	MediaGroupID     string                          `json:"media_group_id,omitempty"`
+	ForwardOrigin    *botapi.MessageOrigin           `json:"forward_origin,omitempty"`
 	ParseMode        string                          `json:"parse_mode,omitempty"`
 	ReplyToMessageID int                             `json:"reply_to_message_id,omitempty"`
 	Edited           bool                            `json:"edited"`
@@ -215,6 +253,8 @@ type FileView struct {
 	Size     int    `json:"size"`
 	Width    int    `json:"width,omitempty"`
 	Height   int    `json:"height,omitempty"`
+	Duration int    `json:"duration,omitempty"`
+	Length   int    `json:"length,omitempty"`
 }
 
 // DraftView is one rich-message draft of a ChatView: Telegram shows only the
@@ -281,6 +321,8 @@ func (c *chatState) view(now time.Time) ChatView {
 			Deleted:   m.deleted,
 			Rich:      m.rich,
 		}
+		wire := m.clone()
+		mv.Location, mv.Contact, mv.Venue, mv.WebAppData, mv.MediaGroupID, mv.ForwardOrigin = wire.Location, wire.Contact, wire.Venue, wire.WebAppData, wire.MediaGroupID, wire.ForwardOrigin
 		if m.fromBot {
 			mv.From = "bot"
 		} else if m.msg.From != nil {
@@ -300,12 +342,25 @@ func (c *chatState) view(now time.Time) ChatView {
 				Size:     len(m.file.data),
 				Width:    m.file.width,
 				Height:   m.file.height,
+				Duration: m.file.duration, Length: m.file.length,
 			}
 			if len(m.msg.Photo) > 0 {
 				mv.Photo = fv
 			}
 			if m.msg.Document != nil {
 				mv.Document = fv
+			}
+			switch m.file.kind {
+			case "video":
+				mv.Video = fv
+			case "animation":
+				mv.Animation = fv
+			case "audio":
+				mv.Audio = fv
+			case "voice":
+				mv.Voice = fv
+			case "video_note":
+				mv.VideoNote = fv
 			}
 		}
 		v.Messages = append(v.Messages, mv)
@@ -362,6 +417,33 @@ func (v ChatView) Text() string {
 		}
 		sb.WriteString("[" + itoa(m.MessageID) + "] " + who + ": ")
 		switch {
+		case m.Video != nil || m.Animation != nil || m.Audio != nil || m.Voice != nil || m.VideoNote != nil:
+			kind := "video"
+			file := m.Video
+			if m.Animation != nil {
+				kind, file = "animation", m.Animation
+			}
+			if m.Audio != nil {
+				kind, file = "audio", m.Audio
+			}
+			if m.Voice != nil {
+				kind, file = "voice", m.Voice
+			}
+			if m.VideoNote != nil {
+				kind, file = "video_note", m.VideoNote
+			}
+			sb.WriteString("[" + kind + " " + file.Name + "]")
+			if m.Caption != "" {
+				sb.WriteString(" " + strings.ReplaceAll(m.Caption, "\n", "\n    "))
+			}
+		case m.Venue != nil:
+			sb.WriteString("[venue " + m.Venue.Title + "] " + m.Venue.Address)
+		case m.Location != nil:
+			sb.WriteString("[location " + formatCoordinate(m.Location.Latitude) + ", " + formatCoordinate(m.Location.Longitude) + "]")
+		case m.Contact != nil:
+			sb.WriteString("[contact " + m.Contact.FirstName + "] " + m.Contact.PhoneNumber)
+		case m.WebAppData != nil:
+			sb.WriteString("[web_app_data " + m.WebAppData.ButtonText + "] " + m.WebAppData.Data)
 		case m.Photo != nil:
 			sb.WriteString("[photo " + m.Photo.Name + " " + itoa(m.Photo.Width) + "x" + itoa(m.Photo.Height) + "]")
 			if m.Caption != "" {

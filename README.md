@@ -10,7 +10,8 @@ purpose. No token, no phone, no network.
 
 - **A real Bot API surface.** `getMe`, long-polled `getUpdates` with
   `offset` and `allowed_updates`, `sendMessage`, `editMessageText`,
-  `answerCallbackQuery`, photos and documents, chat actions, bot commands,
+  `answerCallbackQuery`, file downloads, photos/video/audio/voice and albums,
+  copy/forward operations, inline results, webhooks, chat information, bot commands,
   the menu button, and the Bot API 10.1 rich messages and drafts with the
   10.3 Stop button. Forms, JSON and multipart are all accepted, so any Bot
   API library works unchanged.
@@ -20,12 +21,14 @@ purpose. No token, no phone, no network.
   keyboard: each is refused with Telegram's own error, so the bug shows up in
   the test and not in a user's chat.
 - **The person's side, scriptable.** A [simulation API](docs/sim-api.md)
-  under `/sim/` injects messages and taps, returns the transcript and every
+  under `/sim/` injects text, media, inline queries, Mini App data and taps,
+  selects inline results, configures chats and members, returns the transcript and every
   Bot API call, schedules faults such as a 429 flood or an outage, and opens
   Mini Apps with launch data signed by the bot's token.
 - **A chat page.** `http://127.0.0.1:18790/` is a Telegram client for the
   bot: type messages, tap buttons, open Mini Apps in a phone frame and watch
-  the Bot API calls arrive.
+  the Bot API calls arrive. With `--inline`, an Inline button lets you search
+  and select the bot's results.
 - **A scripted model.** `--llm` also serves an OpenAI-compatible
   `/v1/chat/completions` that answers by rule, in turn or by echo, streams
   word by word and can call a tool, so an LLM bot runs with no key.

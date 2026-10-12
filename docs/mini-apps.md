@@ -246,6 +246,12 @@ The app talks to the page as to any Telegram web client: it posts `{"eventType":
 
 Any other event is logged and otherwise ignored: the page draws no main or secondary button, shows no popups and delivers no `web_app_data` to the bot. The event log under the phone lists every event in both directions, `← app` for what the app sent and `→ app` for what the page sent, with its data.
 
+### Sending messages to the bot and to chats
+
+An issued launch's signed `query_id` can be answered once with `answerWebAppQuery`. The result appears as the user's message with `via_bot`; a keyboard gives it an `inline_message_id` for later edits. Tests can submit keyboard Mini App data through `POST /sim/webapp/data` to produce `message.web_app_data`, or share a `savePreparedInlineMessage` result through `POST /sim/webapp/share`. The latter checks the designated user, allowed destination and the stand's five-minute expiration. See [sim-api.md](sim-api.md#post-simwebappdata) for bodies and [bot-api.md](bot-api.md) for content limits.
+
+These simulation routes are available independently of browser events. The phone frame still logs unsupported events, including `web_app_data_send` and prepared-message sharing, without automatically submitting them. Reply keyboard launches are not rendered by the chat page.
+
 ### Hooks for browser tests
 
 The page keeps its Mini App state in `window.__tgfakeMiniApp`, so a browser test (Playwright, Puppeteer, Selenium) can drive the frame and read what happened without clicking through the toolbar:

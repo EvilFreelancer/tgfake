@@ -20,13 +20,13 @@ Parameters are read the way the Bot API reads them, so any library works unchang
 
 | Request | What is read |
 |---------|--------------|
-| `Content-Type: multipart/form-data` | The query string and the form fields. File parts stay on the request for `sendPhoto` and `sendDocument`. |
+| `Content-Type: multipart/form-data` | The query string, form fields and file parts, including nested `attach://` references. |
 | `Content-Type: application/json` | The query string and the top-level keys of a JSON object (up to 4 MB). A string value is taken as is; any other value (a number, a boolean, an object, an array, `null`) is kept as its JSON text, so `"reply_markup": {...}` and `"reply_markup": "{...}"` mean the same. |
 | anything else | The query string and an `application/x-www-form-urlencoded` body. |
 
 A parameter whose value is a Bot API object (`reply_markup`, `reply_parameters`, `allowed_updates`, `commands`, `menu_button`, `rich_message`) is JSON text, as on Telegram. A parameter the stand does not read is accepted, recorded in the outbox with the call, and has no other effect.
 
-`chat_id` must be a non-zero integer. A `@channelusername` in its place is answered `Bad Request: chat_id is empty`.
+Send and edit methods require a non-zero integer `chat_id`. Chat information methods also resolve a configured `@channelusername`. Inline edits take `inline_message_id` instead of `chat_id` and `message_id`.
 
 ## Responses
 
@@ -48,30 +48,55 @@ A call is checked in this order: the token (401), then a fault scheduled through
 
 | Method | Reads | Returns |
 |--------|-------|---------|
-| `getMe` | nothing | The bot's `User`: `id` 7000000001, `is_bot`, `first_name` (`--bot-name`), `username` (`--bot-username`), `can_join_groups` true, `can_read_all_group_messages` false, `supports_inline_queries` false. |
+| `getMe` | nothing | The bot's `User`: `id` 7000000001, `is_bot`, `first_name` (`--bot-name`), `username` (`--bot-username`), `can_join_groups` true, `can_read_all_group_messages` false, `supports_inline_queries` from `--inline` (false by default). |
 | `getUpdates` | `offset`, `limit`, `timeout`, `allowed_updates` | An array of `Update`; see [getUpdates](#getupdates). |
 | `setMyCommands` | `commands` | `true`. One list is kept; `scope` and `language_code` are not read. |
 | `getMyCommands` | nothing | The list last set, `[]` before any `setMyCommands`. |
 | `sendMessage` | `chat_id`, `text`, `parse_mode`, `reply_markup`, `reply_parameters` or `reply_to_message_id` and `allow_sending_without_reply` | The sent `Message`. |
-| `sendPhoto` | `chat_id`, `photo` (a multipart upload), `caption`, `parse_mode`, `reply_markup`, the reply parameters | The sent `Message` with one `PhotoSize`. |
-| `sendDocument` | `chat_id`, `document` (a multipart upload), `caption`, `parse_mode`, `reply_markup`, the reply parameters | The sent `Message` with a `Document`. |
+| `getFile` | `file_id` | A `File` with `file_path`, downloadable from `/file/bot<token>/<file_path>`. |
+| `sendPhoto` | `chat_id`, `photo` (upload, known file id or URL), `caption`, `parse_mode`, `reply_markup`, reply parameters, `protect_content` | The sent `Message` with one `PhotoSize`. |
+| `sendDocument` | Same, with `document` | The sent `Message` with a `Document`. |
+| `sendVideo` | Same, with `video`; `width`, `height`, `duration` | The sent `Message` with a `Video`. |
+| `sendAnimation` | Same, with `animation`; `width`, `height`, `duration` | The sent `Message` with an animation. |
+| `sendAudio` | Same, with `audio`; `duration`, `performer`, `title` | The sent `Message` with an `Audio`. |
+| `sendVoice` | Same, with `voice`; `duration` | The sent `Message` with a voice message. |
+| `sendVideoNote` | `chat_id`, `video_note` (upload or known id), `duration`, `length`, keyboard, reply and protection parameters | The sent `Message` with a video note; no caption. |
+| `sendMediaGroup` | `chat_id`, `media` (array of photo/video/audio/document input media), reply and protection parameters | An array of messages sharing a `media_group_id`. Photo/video may mix; audio and document albums must be homogeneous. |
+| `sendLocation` | `chat_id`, `latitude`, `longitude`, keyboard, reply and protection parameters | A `Message` with a static location. |
+| `sendVenue` | Same, plus `title`, `address`, Foursquare/Google place fields | A `Message` with a venue and its location. |
+| `sendContact` | `chat_id`, `phone_number`, `first_name`, `last_name`, `vcard`, keyboard, reply and protection parameters | A `Message` with a contact. |
 | `editMessageText` | `chat_id`, `message_id`, `text`, `parse_mode`, `reply_markup` | The edited `Message`, with `edit_date`. |
 | `editMessageReplyMarkup` | `chat_id`, `message_id`, `reply_markup` | The edited `Message`. Without `reply_markup` the keyboard is removed. |
+| `editMessageCaption` | Message target, `caption`, `parse_mode`, `reply_markup` | The edited `Message`, or `true` for an inline target. |
+| `editMessageMedia` | Message target, `media` (photo/video/animation/audio/document), `reply_markup` | The edited `Message`, or `true` for an inline target. Album media keeps its type restrictions. |
+| `copyMessage` | `chat_id`, `from_chat_id`, `message_id`, optional `caption`, keyboard, reply and protection parameters | A `MessageId`; the copy has no forward origin. |
+| `forwardMessage` | `chat_id`, `from_chat_id`, `message_id`, `protect_content` | A `Message` with `forward_origin`; protected source messages cannot be forwarded. |
+| `copyMessages`, `forwardMessages` | Destination/source chat ids, `message_ids` array; `remove_caption` for copies, `protect_content` | An array of `MessageId`; missing/deleted source messages are skipped and album grouping is preserved. |
 | `deleteMessage` | `chat_id`, `message_id` | `true`. |
+| `deleteMessages` | `chat_id`, `message_ids` array | `true`; missing messages in a known chat are skipped. |
 | `sendChatAction` | `chat_id` (`action` is recorded, not read) | `true`. The chat shows "typing…" for 5 seconds. |
 | `answerCallbackQuery` | `callback_query_id`, `text`, `show_alert` | `true`. The answer is kept in the chat's `callbacks`. |
 | `sendRichMessage` | `chat_id`, `rich_message` (`{"markdown": ...}` or `{"html": ...}`), `reply_markup`, the reply parameters | The sent `Message`; its `text` is the markdown, else the HTML. |
 | `sendRichMessageDraft` | `chat_id`, `draft_id`, `rich_message`, `can_stop`, `keep_on_stop`, `message_thread_id` | `true`. |
 | `setChatMenuButton` | `chat_id` (optional), `menu_button` | `true`; see [mini-apps.md](mini-apps.md#the-menu-button). |
 | `getChatMenuButton` | `chat_id` (optional) | The `MenuButton` the chat shows. |
-| `deleteWebhook` | nothing | `true`. There is no webhook to delete; it is accepted so a library that calls it before polling works. |
-| `getWebhookInfo` | nothing | `{"url": "", "has_custom_certificate": false, "pending_update_count": N, "allowed_updates": [...]}`, with the number of unconfirmed updates and the subscription in force (`null` for every kind). |
+| `answerInlineQuery` | `inline_query_id`, `results` | `true`; keeps offered results for selection through `/sim/inline/choose`. |
+| `answerWebAppQuery` | `web_app_query_id`, `result` | A `SentWebAppMessage`; sends a message on behalf of the user of an issued Mini App launch. |
+| `savePreparedInlineMessage` | `user_id`, `result`, `allow_user_chats`, `allow_bot_chats`, `allow_group_chats`, `allow_channel_chats` | A `PreparedInlineMessage` for sharing through `/sim/webapp/share`. |
+| `setWebhook` | `url`, `secret_token`, `allowed_updates`, `drop_pending_updates`, `max_connections`, `ip_address`, uploaded `certificate` | `true`; delivers queued updates by HTTP POST. An empty URL deletes the webhook. |
+| `deleteWebhook` | `drop_pending_updates` | `true`; stops delivery and optionally clears the queue. |
+| `getWebhookInfo` | nothing | URL, custom certificate flag, pending count, subscription, connection limit, configured IP and last delivery error. |
+| `getChat` | `chat_id` | A `ChatFullInfo` for a known chat. |
+| `getChatMember` | `chat_id`, `user_id` | A configured/inferred `ChatMember`; a known user outside the chat has status `left`. |
+| `getChatAdministrators` | `chat_id`, `return_bots` | Creator/administrator members, ordered by user id. Other bots are excluded unless requested. |
+| `getChatMemberCount` | `chat_id` | The number of present members. |
+| `getUserProfilePhotos` | `user_id`, `offset`, `limit` | Configured profile photos; a known user has an empty list by default. |
 
 Messages, updates, keyboards and the other objects have the shapes of the types in [`pkg/botapi`](../pkg/botapi/types.go).
 
 ## getUpdates
 
-The stand delivers three kinds of update: `message`, created by `POST /sim/message`, `callback_query`, created by `POST /sim/callback`, and `stopped_message_generation`, created by `POST /sim/draft/stop` ([sim-api.md](sim-api.md)). Update ids start at 1 and grow by one for every update created; they are never reused, not even after `POST /sim/reset`, because a polling bot remembers the last id it confirmed and would drop anything numbered below it.
+The stand creates `message` (text, incoming media or `web_app_data`), `callback_query`, `inline_query`, `chosen_inline_result` and `stopped_message_generation` updates through the [simulation API](sim-api.md). Update ids start at 1 and grow by one for every update created; they are never reused, not even after `POST /sim/reset`, because a polling bot remembers the last id it confirmed and would drop anything numbered below it. Polling while a webhook is active returns HTTP 409; delete the webhook first.
 
 | Parameter | Behaviour |
 |-----------|-----------|
@@ -92,13 +117,19 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Replies.** A send replies to a message named by `reply_parameters` (`{"message_id": N, "allow_sending_without_reply": true}`) or by the older `reply_to_message_id` with `allow_sending_without_reply=true`. The answer carries `reply_to_message`, the quoted message without its own quote. A reply to a message that is not in the chat, or was deleted, is refused unless `allow_sending_without_reply` is set, in which case the message goes out unthreaded.
 
-**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. `sendPhoto` and `sendDocument` keep an inline keyboard under the file and `sendRichMessage` under the rich message, held to the same rules as a text message's. A button must have exactly one action: `callback_data`, `url` or `web_app`; `web_app` buttons are covered in [mini-apps.md](mini-apps.md).
+**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat` or `copy_text`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md).
 
-**Edits.** Only the bot's own messages can be edited. `editMessageText` replaces the text and the keyboard (a call without `reply_markup` leaves the message with none) and records the new `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. An edit that changes neither the text nor the keyboard is refused. Two keyboards are the same when every button has the same text, `callback_data`, `url` and `web_app` address.
+**Edits.** The bot's own messages and messages sent via this bot can be edited. `editMessageText` replaces text and keyboard (omitted `reply_markup` removes it) and records `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. Caption/media edits use the same target and keyboard rules. An unchanged edit is refused. Keyboard equality includes every supported button action. Inline targets return `true`; ordinary targets return the edited message.
 
 **Deletes.** `deleteMessage` marks a message, the bot's or the person's, as deleted. The text transcript leaves it out, the JSON transcript shows it with `"deleted": true`, and it can no longer be edited, replied to or tapped.
 
-**Photos and documents.** Only uploads are accepted: the file is the multipart part named `photo` or `document`. File ids are `file_1`, `file_2` and so on, with `file_unique_id` `ufile_1` and so on. A photo must decode as PNG, JPEG or GIF and is described by one `PhotoSize` with its real width and height; a document's `mime_type` is detected from its content. The bytes are kept and served at `GET /sim/file/{file_id}`. In the outbox a stored upload is recorded under its parameter as `<file name> (<size> bytes)`.
+**Files and media.** A file parameter accepts a multipart upload, an `attach://part_name` reference, a known file id of the same type or an HTTP(S) URL (except video notes). File ids are `file_1`, `file_2` and so on, with `file_unique_id` `ufile_1` and so on. A photo must decode as PNG, JPEG or GIF and is described by one `PhotoSize` with its real dimensions. Other media bytes are opaque: MIME type is detected, while dimensions, duration, performer and title come from supplied metadata; no codec probing or transcoding occurs. Incoming media uses the same file store. `getFile` supplies the authenticated download path, while `/sim/file/{file_id}` serves the bytes to tests and the chat page. A stored upload is recorded as `<file name> (<size> bytes)` in the outbox.
+
+**Inline and Mini App messages.** Enable `--inline` (`Options.InlineMode`) before injecting an inline query. Results support article, photo, video, audio, voice, document, gif, mpeg4_gif, static location, venue and contact; input message content supports text, static location, venue and contact. Media is resolved when selected, so cached ids must belong to this stand and remote URLs must be reachable. Selection adds a user message with `via_bot` and queues `chosen_inline_result`. A result with a keyboard also gets an `inline_message_id`, usable by all four edit methods. `answerWebAppQuery` consumes an issued launch query once. Prepared messages have a deterministic five-minute lifetime in the stand and enforce the designated user and allowed destination types.
+
+**Webhooks.** Updates are delivered oldest first, one request at a time. A 2xx response confirms the update; failures retain it, update `last_error_date`/`last_error_message` and retry after one second. A JSON response containing `method` and parameters can call a Bot API method. Changing or deleting the webhook cancels an in-flight request without losing its queued update; `Close` cancels delivery and media URL downloads. Localhost/loopback HTTP URLs and arbitrary local ports are allowed so a test can run its receiver offline. Other URLs must be HTTPS on Telegram's allowed ports. Uploaded PEM certificates extend the client's trust roots. `max_connections` is reported but delivery stays serialized; `ip_address` is reported without overriding DNS.
+
+**Chat information.** A chat starts with the bot as a member; injected users become members unless a test configured their status. `/sim/chat/configure` supplies metadata and membership, including administrators, restricted and absent users. `/sim/user/profile` supplies photo sets using known photo ids. Configured information is copied and reset with the session; querying it never changes membership.
 
 **Callback queries.** A tap through the simulation API mints a query id `cbq-1`, `cbq-2` and so on. A query takes one answer: once answered it is forgotten, so a second answer is refused like an unknown one, and so is an answer to a query minted before a reset. The answers are listed in the chat's `callbacks` with their `text` and `show_alert`.
 
@@ -116,7 +147,14 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 | `caption` of `sendPhoto` and `sendDocument` | At most 1024 characters. |
 | `callback_data` of a button | At most 64 bytes. |
 | `photo` upload | 10 MiB. |
-| `document` upload | 50 MiB. |
+| other media upload | 50 MiB. |
+| URL download | 5 MiB for photos, 20 MiB for other media. |
+| `getFile` download | 20 MiB. |
+| media album | At most 10 items; the Bot API server also accepts a singleton. |
+| `message_ids` array | 1 to 100 ids. |
+| inline results | At most 50; result ids contain 1 to 64 bytes. |
+| prepared message | 5 minutes in the stand. |
+| `copy_text.text` | 1 to 256 characters. |
 | `limit` of `getUpdates` | 100. |
 | a draft's lifetime | 30 seconds after its last revision. |
 | "typing…" after `sendChatAction` | 5 seconds. |
@@ -144,7 +182,7 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | same | a `web_app` button to plain http on a host other than this machine | `Bad Request: inline keyboard button Web App URL '<url>' is invalid: Only HTTPS links are allowed` |
 | `sendMessage`, `sendPhoto`, `sendDocument`, `sendRichMessage` | `reply_parameters` is not a JSON object | `Bad Request: can't parse reply parameters JSON object` |
 | same | the message replied to is not in the chat or was deleted, and `allow_sending_without_reply` is not set | `Bad Request: message to be replied not found` |
-| `sendPhoto`, `sendDocument` | no file part of that name, for example a `file_id` or a URL in place of an upload | `Bad Request: there is no photo in the request` (`document` for `sendDocument`) |
+| media send | no upload or file reference | `Bad Request: there is no photo in the request` (the corresponding media name for other methods) |
 | `sendPhoto`, `sendDocument` | the upload is over 10 MiB (photo) or 50 MiB (document) | `Bad Request: file is too big` |
 | `sendPhoto`, `sendDocument` | `caption` is over 1024 characters | `Bad Request: message caption is too long` |
 | `sendPhoto` | the upload is not a PNG, JPEG or GIF image | `Bad Request: IMAGE_PROCESS_FAILED` |
@@ -166,14 +204,35 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 
 `setChatMenuButton` checks the button before the chat, as the Bot API does. A refused call stores no message, replaces no keyboard and uses up no callback query.
 
+Additional refusals for the extended methods:
+
+| Call | Refused when | Description |
+|------|--------------|-------------|
+| `getFile` | no id / unknown id / file over 20 MiB | `Bad Request: file_id not specified` / `Bad Request: wrong file_id or the file is temporarily unavailable` / `Bad Request: file is too big` |
+| media send | unknown or wrong-type file id / oversized caption or bytes | The same file-id, caption and size errors as above. |
+| `sendMediaGroup` | empty / over 10 items / mixed audio or document album | `Bad Request: there are no messages to send` / `Bad Request: too many messages to send as an album` / `Bad Request: audio can't be mixed with other media types` (or `document`) |
+| media edit | target missing, deleted, not editable or unchanged | The same edit errors as above. |
+| `copyMessage`, `forwardMessage` | missing/deleted source | `Bad Request: message to copy not found` / `Bad Request: message to forward not found` |
+| `forwardMessage` | protected source | `Bad Request: message can't be forwarded` |
+| bulk copy/forward/delete | missing, malformed, empty, oversized or invalid ids | `Bad Request: message identifiers are not specified`, `can't parse message_ids JSON object`, `expected an Array of message identifiers`, `too many message identifiers specified` or `invalid message identifier specified`, each with `Bad Request: `. |
+| location send | missing coordinates / invalid coordinates | `Bad Request: latitude is empty` / `Bad Request: longitude is empty` / `Bad Request: invalid location specified` |
+| contact send | missing phone or first name | `Bad Request: phone_number is empty` / `Bad Request: first_name is empty` |
+| inline answer | unknown/already answered query / over 50 results / invalid or duplicate result id | The query error above / `Bad Request: too many inline query results specified` / `Bad Request: RESULT_ID_INVALID` / `Bad Request: RESULT_ID_DUPLICATE`. |
+| `answerWebAppQuery` | launch query unknown, reset or already consumed | The query error above. |
+| chat information | chat unknown / invalid or unknown user | `Bad Request: chat not found` / `Bad Request: invalid user_id specified` / `Bad Request: user not found` |
+| `getUpdates` | webhook active (409) | `Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first` |
+| `setWebhook` | malformed URL / external HTTP / unsupported external port | `Bad Request: invalid webhook URL specified` / `Bad Request: bad webhook: An HTTPS URL must be provided for webhook` / `Bad Request: bad webhook: Webhook can be set up only on ports 80, 88, 443 or 8443` |
+| `setWebhook` | secret over 256 bytes / characters outside A-Z, a-z, 0-9, `_`, `-` | `Bad Request: secret token is too long` / `Bad Request: secret token contains illegal characters` |
+
+The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate decoding failures currently use `Bad Request: invalid certificate` rather than OpenSSL's platform-specific diagnostic; these are deliberate validation approximations. Delivery/network diagnostics come from Go's HTTP client. Advanced parameters not listed here are recorded without affecting state.
+
 ## Not implemented
 
-- Methods that are not in the [table above](#methods) answer `404` with `Not Found: method not found` (unless a fault is scheduled for them). That covers, among others, `getFile`, `forwardMessage`, `copyMessage`, `sendVideo`, `sendAudio`, `sendVoice`, `sendSticker`, `sendMediaGroup`, `editMessageCaption`, `editMessageMedia`, `setWebhook`, `getChat`, `getChatMember`, `answerInlineQuery`, `answerWebAppQuery` and every payment, sticker and chat administration method.
-- Webhooks: only `deleteWebhook` and `getWebhookInfo` exist, and the stand never calls a bot. Updates are delivered by `getUpdates` alone.
-- The person sends text only. There are no incoming photos, documents, voice messages, locations, contacts or other media, no `web_app_data` service messages from a Mini App, and no `edited_message`, `channel_post`, `inline_query`, `chosen_inline_result`, `my_chat_member`, `chat_member` or `message_reaction` updates: the stand creates `message`, `callback_query` and `stopped_message_generation` updates only.
-- Inline mode, payments, games, polls, stickers, forum topics and business connections are not modelled.
-- `inline_message_id`: messages are addressed by `chat_id` and `message_id` only.
+- Methods outside the [table above](#methods) answer `404` with `Not Found: method not found`, including payments, stickers, polls, live photos, games, forum topics and chat administration mutations.
+- Incoming location/contact messages, `edited_message`, `channel_post`, membership and reaction updates are not injected. Chat configuration changes no update queue.
+- Inline games/stickers, invoice/rich input content, cache behavior, pagination buttons and query timeouts are not modelled. `cache_time`, `is_personal`, `next_offset` and the inline results button are only recorded.
+- Media thumbnails, codec validation, live locations, full Telegram membership/permission enforcement and service-message copy restrictions are not modelled. Inline media edits currently resolve uploads as ordinary edits; Telegram permits only existing ids and URLs for inline targets.
 - Formatting: `parse_mode` is not parsed, so `can't parse entities` never happens on its own. Schedule a fault with `contains` to see it ([sim-api.md](sim-api.md#faults)).
 - Reply keyboards (`keyboard`, `remove_keyboard`, `force_reply`) are accepted and dropped, not shown.
 - Rate limits are not enforced. A `429` happens only when a fault is scheduled.
-- Two `getUpdates` requests at once are both answered from the same queue; there is no `409 Conflict`.
+- Two concurrent polls are answered from the same queue; only the polling/webhook conflict is implemented.

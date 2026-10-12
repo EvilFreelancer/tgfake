@@ -22,6 +22,8 @@ The module needs Go 1.22 or newer (`go 1.22.0` in `go.mod`). The packages import
 | `BotID` | `server.DefaultBotID` (`7000000001`) | The user id `getMe` reports. |
 | `MaxPollWait` | 30 s | The longest a `getUpdates` request is held open. Keep it short in tests. |
 | `AllowedUpdates` | nil | The subscription the bot starts with, as a previous bot process would have left it; nil delivers every kind. |
+| `InlineMode` | false | Enable inline query injection and report the BotFather setting in `getMe`. |
+| `HTTPClient` | a client with a 10 s timeout | Client for media URL downloads and webhook delivery. Configure before serving; it is not mutated. |
 | `Logf` | nil | Receives one line per Bot API call, for example `t.Logf`. |
 
 `Close()` releases every `getUpdates` request held open. Call it before `httptest.Server.Close`, which waits for open requests to finish and would otherwise wait for a held poll to time out. After `Close` a poll answers at once instead of waiting; calling `Close` more than once is harmless.
@@ -44,6 +46,14 @@ t.Cleanup(func() {
 | `InjectCallback(in IncomingCallback) (updateID int, callbackID string, err error)` | The person taps a button, by `Label` or by `Data`; an error says why nothing could be tapped. |
 | `StopDraft(in DraftStop) (updateID int, err error)` | The person presses Stop under a draft streamed with `can_stop`; an error says why nothing could be stopped. |
 | `LaunchWebApp(req WebAppLaunch) (LaunchedWebApp, error)` | The person opens a Mini App; the answer is the launch address and the signed launch data. |
+| `InjectMedia(in IncomingMedia) (int, int, error)` | Store incoming bytes and queue a message; JSON `Data` is base64, Go `Data` is `[]byte`. |
+| `InjectInlineQuery(in IncomingInlineQuery) (int, string, error)` | Queue an inline query and return update/query ids. Requires `InlineMode`. |
+| `InlineQueries() []InlineQueryView` | Read copied query payloads and the results the bot offered. |
+| `ChooseInlineResult(in InlineChoice) (int, string, error)` | Insert a selected result, queue `chosen_inline_result`, return message/inline ids. |
+| `InjectWebAppData(in WebAppSubmission) (int, int, error)` | Queue a `message.web_app_data` service message. |
+| `SharePreparedMessage(in PreparedMessageShare) (int, error)` | Share a prepared result, checking user, expiration and destination flags. |
+| `ConfigureChat(in ChatConfiguration) error` | Replace copied chat metadata and members; preserve the transcript. |
+| `ConfigureUserProfile(in UserProfileConfiguration) error` | Replace a user's profile photo sets using known photo ids. |
 
 `IncomingMessage`, `IncomingCallback`, `DraftStop` and `WebAppLaunch` are the request bodies of `POST /sim/message`, `POST /sim/callback`, `POST /sim/draft/stop` and `POST /sim/webapp/launch`, with the same fields and defaults: zero fields mean user 4242 `alice` in her private chat 4242. The fields are listed in [sim-api.md](sim-api.md#post-simmessage) and [mini-apps.md](mini-apps.md#launches). The default user's id is not exported; tests write `4242`.
 
@@ -71,7 +81,7 @@ The outbox records every call when the stand answers it, refused ones included, 
 - `FindButton(label string) (messageID int, data string, ok bool)` finds a button by its visible text: the newest message that is not deleted and shows it wins, and a `✓ ` prefix is ignored on both sides. It returns the message and the button's `callback_data`.
 - `Text() string` renders the transcript as plain lines, the text format of [sim-api.md](sim-api.md#the-text-format).
 
-A `MessageView` has `MessageID`, `From` (`"bot"` or `"user"`), `Username`, `Text`, `Caption`, `Photo` and `Document` (`*FileView`), `ParseMode`, `ReplyToMessageID`, `Edited`, `Deleted`, `Rich` and `Keyboard`. A `Call` has `Seq`, `At`, `Method`, `Params` (the first value of each parameter), `Status` and `Response` (the raw JSON answered).
+A `MessageView` has `MessageID`, `From` (`"bot"` or `"user"`), `Username`, `Text`, `Caption`, `Photo`, `Document`, `Video`, `Audio`, `Voice`, `Animation`, `VideoNote` (`*FileView`), `Location`, `Venue`, `Contact`, `WebAppData`, `MediaGroupID`, `ForwardOrigin`, `ParseMode`, `ReplyToMessageID`, `Edited`, `Deleted`, `Rich` and `Keyboard`. A `Call` has `Seq`, `At`, `Method`, `Params` (the first value of each parameter), `Status` and `Response` (the raw JSON answered).
 
 ### Faults
 
@@ -90,11 +100,11 @@ fake.SetFault(server.Fault{Method: "sendMessage", Code: 429, RetryAfter: 1, Time
 
 ### Reset
 
-`Reset()` forgets the chats, the outbox, the faults, the commands, the callback queries, the menu buttons and the uploaded files, like `POST /sim/reset`. Update ids keep growing and the `allowed_updates` subscription stays.
+`Reset()` forgets chats and configured information, the outbox, faults, commands, callback/inline/Mini App queries, prepared messages, menu buttons and uploaded files. Update and inline ids keep growing; the subscription and webhook stay. `Close()` also cancels webhook requests and media URL downloads and waits for the webhook worker to exit.
 
 ### Exported names
 
-The constants `DefaultBotUsername`, `DefaultBotFirstName` and `DefaultBotID` are the bot a stand with no options plays. The types are `Server`, `Options`, `Call`, `CallbackAnswer`, `ChatSummary`, `ChatView`, `DraftStop`, `DraftView`, `Fault`, `FileView`, `IncomingCallback`, `IncomingMessage`, `LaunchedWebApp`, `MessageView` and `WebAppLaunch`.
+The constants `DefaultBotUsername`, `DefaultBotFirstName` and `DefaultBotID` are the bot a stand with no options plays. Besides the types above, the request/view types are `IncomingMedia`, `IncomingInlineQuery`, `InlineChoice`, `InlineQueryView`, `WebAppSubmission`, `PreparedMessageShare`, `ChatConfiguration` and `UserProfileConfiguration`. Their fields match the bodies in [sim-api.md](sim-api.md).
 
 ### A complete test
 
@@ -208,7 +218,7 @@ t.Cleanup(func() {
 
 ## pkg/botapi
 
-The wire shapes of the Bot API objects the stand sends and reads, written for the stand rather than borrowed from a Telegram library: `Update`, `Message`, `User`, `Chat`, `MessageEntity`, `CallbackQuery`, `InlineKeyboardMarkup`, `InlineKeyboardButton`, `WebAppInfo`, `MenuButton`, `PhotoSize`, `Document` and `BotCommand`. They carry the subset of fields the stand produces. A test decodes what the stand answered with them, for example the message a call returned:
+The wire shapes of the Bot API objects the stand sends and reads, written for the stand rather than borrowed from a Telegram library. In addition to messages, updates, users, chats and keyboards, these include `File`, `Video`, `Audio`, `VideoNote`, `Location`, `Venue`, `Contact`, `WebAppData`, `InlineQuery`, `ChosenInlineResult`, `SentWebAppMessage`, `PreparedInlineMessage`, `MessageID`, `MessageOrigin` and `UserProfilePhotos`. `ChatFullInfo` and `ChatMember` are map types so tests can configure the many optional Telegram fields. They carry the subset of fields the stand produces. A test decodes what the stand answered with them, for example the message a call returned:
 
 ```go
 call := fake.Calls("sendMessage")[0]

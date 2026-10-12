@@ -277,6 +277,10 @@ func (s *Server) wakeLocked() {
 // updateKind names an update the way allowed_updates does.
 func updateKind(u botapi.Update) string {
 	switch {
+	case u.InlineQuery != nil:
+		return "inline_query"
+	case u.ChosenInlineResult != nil:
+		return "chosen_inline_result"
 	case u.CallbackQuery != nil:
 		return "callback_query"
 	case u.StoppedMessageGeneration != nil:

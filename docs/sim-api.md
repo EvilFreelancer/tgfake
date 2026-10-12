@@ -10,7 +10,7 @@ O=http://127.0.0.1:18790
 
 ## Conventions
 
-Request bodies are JSON objects of at most 1 MB; no `Content-Type` header is required. Answers are JSON, except the text transcript and the file download. A request that cannot be served is answered with an HTTP error status and an object naming the reason:
+Request bodies are JSON objects of at most 1 MB, except `/sim/media` which allows 72 MiB for a base64-encoded upload; no `Content-Type` header is required. Answers are JSON, except the text transcript and the file download. A request that cannot be served is answered with an HTTP error status and an object naming the reason:
 
 ```json
 {"error":"text is empty"}
@@ -23,15 +23,23 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | Method and path | What it does |
 |-----------------|--------------|
 | `POST /sim/message` | The person sends a text message. |
+| `POST /sim/media` | The person sends a file, photo, video or audio message. |
+| `POST /sim/inline` | Inject an inline query (requires `--inline`). |
+| `GET /sim/inline` | Read queries and the bot's offered results. |
+| `POST /sim/inline/choose` | Select an offered result and queue `chosen_inline_result`. |
+| `POST /sim/chat/configure` | Configure chat metadata and members. |
+| `POST /sim/user/profile` | Configure a user's profile photos. |
 | `POST /sim/callback` | The person taps an inline keyboard button. |
 | `POST /sim/draft/stop` | The person presses Stop under a streamed draft. |
 | `GET /sim/outbox` | Every Bot API call the stand answered, oldest first. |
 | `GET /sim/outbox/count` | How many Bot API calls the stand answered. |
 | `GET /sim/chat/{id}` | The transcript of a chat, as JSON or as text. |
-| `GET /sim/file/{id}` | The bytes of a photo or document the bot uploaded. |
+| `GET /sim/file/{id}` | The bytes of any stored incoming or outgoing media. |
 | `GET /sim/chats` | The chats the stand knows. |
 | `GET /sim/state` | The bot, the update queue, the subscription, the commands, the menu button and the faults. |
 | `POST /sim/webapp/launch` | The person opens a Mini App. |
+| `POST /sim/webapp/data` | Deliver a Mini App's `web_app_data` service message. |
+| `POST /sim/webapp/share` | Share a prepared inline message for its designated user. |
 | `GET /sim/webapp/theme/{scheme}` | The theme parameters of the light or dark theme. |
 | `POST /sim/fault` | Schedule a fault, or clear one. |
 | `DELETE /sim/fault` | Clear every fault. |
@@ -79,6 +87,54 @@ curl -s "$O/sim/chat/-100000004242?format=text"
 ```text
 [1] alice: @tgfake_bot what time is it?
 ```
+
+## POST /sim/media
+
+Stores incoming bytes and queues a `message` update carrying a file id. The usual user/chat identity fields of `/sim/message` apply. `type` is one of `photo`, `document`, `video`, `audio`, `voice`, `animation`, `video_note`; `data` is base64 and `file_name` defaults to the type. Optional fields are `caption`, `width`, `height`, `duration` and video-note `length`. A photo must decode as PNG, JPEG or GIF; its dimensions come from the bytes. Other media keeps the supplied metadata. Limits are 10 MiB for photos, 50 MiB for other files and 1024 characters for a caption. The answer contains `message_id` and `update_id`.
+
+```bash
+curl -s -X POST $O/sim/media \
+  -d '{"type":"document","file_name":"hello.txt","data":"aGVsbG8="}'
+```
+
+The bot can download these bytes with `getFile`, then reuse the file id in a send of the same type. The SDK's `api.getFileContent` and `api.getFileStream` use this path.
+
+## Inline queries and selection
+
+`POST /sim/inline` requires `--inline` (`Options.InlineMode`). The body contains `query`, optional `offset`, `chat_type`, `location` and the usual `user_id`, `username`, `first_name`. It queues an `inline_query` and returns `update_id` and `inline_query_id`. The query is not itself a chat message.
+
+`GET /sim/inline` returns `{"queries":[{"query":{...},"answered":true,"results":[...]}]}` in creation order. A query stays unanswered until the bot successfully calls `answerInlineQuery`; results are stored as Bot API objects. Check `answered` when waiting for a handler.
+
+`POST /sim/inline/choose` takes `inline_query_id`, `result_id` and optional `chat_id`, `chat_type`. The default destination is the querying user's private chat. It inserts a user message with `via_bot`, queues `chosen_inline_result` and returns `message_id` and `inline_message_id` (empty unless the result has a keyboard). Selection can be repeated. Unknown queries or results return a simulation error. Supported content and limits are in [bot-api.md](bot-api.md#chats-and-messages).
+
+```bash
+curl -s -X POST $O/sim/inline -d '{"query":"hello"}'
+curl -s $O/sim/inline
+curl -s -X POST $O/sim/inline/choose \
+  -d '{"inline_query_id":"1","result_id":"echo","chat_id":4242}'
+```
+
+## POST /sim/chat/configure
+
+The body is `{"chat":{...},"members":[...]}` using the Bot API shapes of `ChatFullInfo` and `ChatMember`. `chat.id` must be non-zero and `chat.type` one of `private`, `group`, `supergroup`, `channel`. Additional metadata such as `username`, `description` or `permissions` is returned by `getChat`. Member statuses are `creator`, `administrator`, `member`, `restricted`, `left`, `kicked`; each member needs a user with a positive id. Omitted required boolean fields default to false. The bot is added as a member unless the list explicitly supplies its status.
+
+Configuration replaces metadata and membership, preserves the transcript and creates no update. Incoming messages add a user only if that user has no configured member entry. An invalid configuration changes nothing. The answer is `{"ok":true}`.
+
+```bash
+curl -s -X POST $O/sim/chat/configure -d '{"chat":{"id":-100,"type":"supergroup","title":"Test","username":"test_group"},"members":[{"status":"creator","is_anonymous":false,"user":{"id":4242,"is_bot":false,"first_name":"Alice"}}]}'
+```
+
+## POST /sim/user/profile
+
+The body is `{"user":{...},"photos":[[PhotoSize,...],...]}`. The user needs a positive id, and each non-empty photo size array must reference known photo file ids. Dimensions, unique ids and sizes are normalized from stored files. This registers the user and replaces their photo sets for `getUserProfilePhotos`; no update is created. An empty list clears photos. The answer is `{"ok":true}`.
+
+## POST /sim/webapp/data
+
+The usual user/chat fields plus `data` (1-4096 bytes) and `button_text` inject a `message.web_app_data` service message. It has no `text`, and the transcript displays its data separately. The answer is `message_id` and `update_id`. This lets a test simulate `Telegram.WebApp.sendData` without depending on browser bridge events.
+
+## POST /sim/webapp/share
+
+Takes `id` returned by `savePreparedInlineMessage`, `user_id` (default 4242), `chat_id`, `chat_type` (default `private`) and `bot_chat` (default false). The designated user, five-minute fake expiration and allowed destination flags are checked before the message is inserted. Private destinations use `allow_bot_chats` when `bot_chat=true`, otherwise `allow_user_chats`; groups and channels use their corresponding flags. Sharing returns `message_id`, adds a user message with `via_bot` and can be repeated. It creates no incoming message update, like selecting a prepared result in the client.
 
 ## POST /sim/callback
 
@@ -223,7 +279,7 @@ typing…
 
 ## GET /sim/file/{id}
 
-The bytes the bot uploaded with `sendPhoto` or `sendDocument` under a `file_id` such as `file_1`, with the content type detected at upload. An unknown id is answered `404 no such file`.
+The bytes stored by any media send or `/sim/media` under a `file_id` such as `file_1`, with the content type detected at upload. An unknown id is answered `404 no such file`. Bot libraries use the authenticated `/file/bot<token>/<file_path>` returned by `getFile`; this simulation route needs no token.
 
 ```bash
 curl -s -o photo.png $O/sim/file/file_1
@@ -347,8 +403,9 @@ Starts a new session without restarting the command. It answers `{"ok":true}` an
 - the callback queries (an answer to a query minted before the reset is refused, and numbering starts again at `cbq-1`);
 - the uploaded files (numbering starts again at `file_1`);
 - the menu buttons, the bot's and the chats'.
+- configured chat members/metadata, profile photos, inline queries/results, inline edit targets, prepared messages and issued Mini App query ids.
 
-Update ids keep growing: a bot that is polling remembers the last id it confirmed and would drop anything numbered below it. The `allowed_updates` subscription stays as well, as Telegram keeps it with the token rather than with the chats, and so does the token launch data is signed with.
+Update ids keep growing: a bot that is polling remembers the last id it confirmed and would drop anything numbered below it. The `allowed_updates` subscription, configured webhook and signing token stay. Inline/prepared id counters also keep growing to avoid collisions with retained client ids. A Serverless project's database is not reset.
 
 ```bash
 curl -s -X POST $O/sim/reset
