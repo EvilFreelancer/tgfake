@@ -23,7 +23,7 @@ func TestCommandRunsServerlessProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := startCommand(t, "--serverless", project, "--serverless-db", filepath.Join(t.TempDir(), "bot.sqlite"), "--serverless-migrate", "--inline")
+	c := startCommandWithin(t, 2*time.Minute, "--serverless", project, "--serverless-db", filepath.Join(t.TempDir(), "bot.sqlite"), "--serverless-migrate", "--inline")
 	c.postJSON("/sim/message", map[string]any{"text": "hello"})
 	waitCalls := func(method string, count int) {
 		t.Helper()
