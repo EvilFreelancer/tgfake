@@ -161,7 +161,9 @@ runs:
         if command -v cygpath > /dev/null 2>&1; then launcher=(); fi
         # Word splitting of INPUT_ARGS is the point: it carries several flags.
         # shellcheck disable=SC2086
-        TMPDIR="$RUNNER_TEMP" TMP="$RUNNER_TEMP" TEMP="$RUNNER_TEMP" "${launcher[@]}" "$TGFAKE_BIN" --addr "$INPUT_ADDR" "${serverless_args[@]}" $INPUT_ARGS > "$log" 2>&1 &
+        # ${a[@]+"${a[@]}"}: the Bash 3.2 of macOS takes an empty array for an
+        # unbound variable under set -u.
+        TMPDIR="$RUNNER_TEMP" TMP="$RUNNER_TEMP" TEMP="$RUNNER_TEMP" ${launcher[@]+"${launcher[@]}"} "$TGFAKE_BIN" --addr "$INPUT_ADDR" ${serverless_args[@]+"${serverless_args[@]}"} $INPUT_ARGS > "$log" 2>&1 &
         pid=$!
         # The origin is the one the banner names, so port 0 and a wildcard
         # address work too; a wildcard is reached through the loopback.
