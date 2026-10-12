@@ -224,8 +224,11 @@ func TestWebhooksDeliverRetryAndBlockPolling(t *testing.T) {
 func TestChatInformationUsesConfiguredState(t *testing.T) {
 	s := newStand(t, Options{})
 	status, body := s.sim("POST", "/sim/chat/configure", map[string]any{
-		"chat":    map[string]any{"id": -100, "type": "supergroup", "title": "Test group", "username": "group", "description": "demo"},
-		"members": []map[string]any{{"status": "creator", "user": map[string]any{"id": 4242, "is_bot": false, "first_name": "Alice"}, "is_anonymous": false}},
+		"chat": map[string]any{"id": -100, "type": "supergroup", "title": "Test group", "username": "group", "description": "demo"},
+		"members": []map[string]any{
+			{"status": "creator", "user": map[string]any{"id": 4242, "is_bot": false, "first_name": "Alice"}, "is_anonymous": false},
+			{"status": "administrator", "user": map[string]any{"id": 777, "is_bot": true, "first_name": "Helper"}},
+		},
 	})
 	if status != 200 {
 		t.Fatalf("configure: %d %v", status, body)
@@ -239,11 +242,15 @@ func TestChatInformationUsesConfiguredState(t *testing.T) {
 		t.Fatalf("member: %d %v", status, body)
 	}
 	status, body = s.call("getChatAdministrators", url.Values{"chat_id": {"-100"}})
-	if status != 200 || len(body["result"].([]any)) != 1 {
+	admins, _ := body["result"].([]any)
+	if status != 200 || len(admins) != 2 {
 		t.Fatalf("admins: %d %v", status, body)
 	}
+	if admins[0].(map[string]any)["user"].(map[string]any)["id"] != float64(777) {
+		t.Fatalf("the bot administrator is missing: %v", admins)
+	}
 	status, body = s.call("getChatMemberCount", url.Values{"chat_id": {"-100"}})
-	if status != 200 || body["result"] != float64(2) {
+	if status != 200 || body["result"] != float64(3) {
 		t.Fatalf("member count: %d %v", status, body)
 	}
 }

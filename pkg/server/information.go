@@ -261,8 +261,7 @@ func (s *Server) chatInformation(w http.ResponseWriter, method string, params ur
 				admins := []map[string]any{}
 				for _, id := range ids {
 					member := chat.members[id]
-					user, _ := member["user"].(map[string]any)
-					if (member["status"] == "creator" || member["status"] == "administrator") && (id == s.opts.BotID || user["is_bot"] != true || params.Get("return_bots") == "true") {
+					if member["status"] == "creator" || member["status"] == "administrator" {
 						admins = append(admins, cloneMap(member))
 					}
 				}

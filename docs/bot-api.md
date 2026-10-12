@@ -88,7 +88,7 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `getWebhookInfo` | nothing | URL, custom certificate flag, pending count, subscription, connection limit, configured IP and last delivery error. |
 | `getChat` | `chat_id` | A `ChatFullInfo` for a known chat. |
 | `getChatMember` | `chat_id`, `user_id` | A configured/inferred `ChatMember`; a known user outside the chat has status `left`. |
-| `getChatAdministrators` | `chat_id`, `return_bots` | Creator/administrator members, ordered by user id. Other bots are excluded unless requested. |
+| `getChatAdministrators` | `chat_id` | Every creator/administrator member, other bots included, ordered by user id. |
 | `getChatMemberCount` | `chat_id` | The number of present members. |
 | `getUserProfilePhotos` | `user_id`, `offset`, `limit` | Configured profile photos; a known user has an empty list by default. |
 
