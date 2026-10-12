@@ -141,6 +141,7 @@ func (m *storedMessage) clone() *botapi.Message {
 		out.ReplyToMessage = &q
 	}
 	out.Entities = append([]botapi.MessageEntity(nil), m.msg.Entities...)
+	out.CaptionEntities = append([]botapi.MessageEntity(nil), m.msg.CaptionEntities...)
 	out.Photo = append([]botapi.PhotoSize(nil), m.msg.Photo...)
 	if m.msg.Document != nil {
 		d := *m.msg.Document

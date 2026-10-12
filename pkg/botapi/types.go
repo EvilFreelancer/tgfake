@@ -241,6 +241,7 @@ type Message struct {
 	ViaBot              *User                 `json:"via_bot,omitempty"`
 	HasProtectedContent bool                  `json:"has_protected_content,omitempty"`
 	Entities            []MessageEntity       `json:"entities,omitempty"`
+	CaptionEntities     []MessageEntity       `json:"caption_entities,omitempty"`
 	ReplyToMessage      *Message              `json:"reply_to_message,omitempty"`
 	ReplyMarkup         *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
 }
