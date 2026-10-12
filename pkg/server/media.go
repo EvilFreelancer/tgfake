@@ -56,7 +56,7 @@ func (s *Server) serveFile(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if s.opts.Token != "" && token != s.opts.Token {
-		s.writeError(w, "", nil, 401, "Unauthorized", 0)
+		s.writeError(w, "", nil, 404, "Not Found", 0)
 		return
 	}
 	s.mu.Lock()

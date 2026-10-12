@@ -49,7 +49,7 @@ func TestGetFileDownloadAndReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = response.Body.Close()
-	if response.StatusCode != 401 {
+	if response.StatusCode != 404 {
 		t.Fatal("file download accepted another token")
 	}
 	s.fake.Reset()

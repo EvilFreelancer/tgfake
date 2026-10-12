@@ -6,7 +6,7 @@ This page describes the part of the tgfake server a bot talks to: the Bot API me
 
 A bot calls `<origin>/bot<token>/<method>` where it would call `https://api.telegram.org/bot<token>/<method>`. Any HTTP method works. The method name is matched without regard to case (`getMe`, `getme` and `GETME` are the same method) and a trailing slash after it is ignored.
 
-Any token is accepted unless the command was started with `--token` (or a Go test set `Options.Token`); then every other token is answered `401 Unauthorized`. Without a fixed token the stand remembers the token of the latest call, which is the token Mini App launch data is signed with ([mini-apps.md](mini-apps.md)).
+Any token is accepted unless the command was started with `--token` (or a Go test set `Options.Token`); then every other token is answered `401 Unauthorized`. A download from `/file/bot<token>/<file_path>` with another token is answered with the same `404 Not Found` as an unknown file, the way api.telegram.org's file endpoint does. Without a fixed token the stand remembers the token of the latest call, which is the token Mini App launch data is signed with ([mini-apps.md](mini-apps.md)).
 
 The chat page at `/` and the routes under `/sim/` are served by the stand itself. Every other path that is not of the form `/bot<token>/<method>`, a request to a `/sim/` path with the wrong HTTP method included, is answered with the Bot API's own 404:
 
@@ -166,6 +166,7 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | Call | Refused when | Description |
 |------|--------------|-------------|
 | any method | the token is not the one of `--token` (401) | `Unauthorized` |
+| a `/file/bot<token>/` download | the token is not the one of `--token` (404) | `Not Found` |
 | any method the stand does not serve | always (404) | `Not Found: method not found` |
 | a path that is not `/bot<token>/<method>` | always (404) | `Not Found` |
 | `getUpdates` | `allowed_updates` is not a JSON array | `Bad Request: can't parse allowed_updates JSON array` |
