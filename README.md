@@ -10,7 +10,8 @@ purpose. No token, no phone, no network.
 
 - **A real Bot API surface.** `getMe`, long-polled `getUpdates` with
   `offset` and `allowed_updates`, `sendMessage`, `editMessageText`,
-  `answerCallbackQuery`, photos and documents, chat actions, bot commands,
+  `answerCallbackQuery`, file downloads, photos/video/audio/voice and albums,
+  copy/forward operations, inline results, webhooks, chat information, bot commands,
   the menu button, and the Bot API 10.1 rich messages and drafts with the
   10.3 Stop button. Forms, JSON and multipart are all accepted, so any Bot
   API library works unchanged.
@@ -20,15 +21,21 @@ purpose. No token, no phone, no network.
   keyboard: each is refused with Telegram's own error, so the bug shows up in
   the test and not in a user's chat.
 - **The person's side, scriptable.** A [simulation API](docs/sim-api.md)
-  under `/sim/` injects messages and taps, returns the transcript and every
+  under `/sim/` injects text, media, inline queries, Mini App data and taps,
+  selects inline results, configures chats and members, returns the transcript and every
   Bot API call, schedules faults such as a 429 flood or an outage, and opens
   Mini Apps with launch data signed by the bot's token.
 - **A chat page.** `http://127.0.0.1:18790/` is a Telegram client for the
   bot: type messages, tap buttons, open Mini Apps in a phone frame and watch
-  the Bot API calls arrive.
+  the Bot API calls arrive. With `--inline`, an Inline button lets you search
+  and select the bot's results.
 - **A scripted model.** `--llm` also serves an OpenAI-compatible
   `/v1/chat/completions` that answers by rule, in turn or by echo, streams
   word by word and can call a tool, so an LLM bot runs with no key.
+- **Local Telegram Serverless.** `--serverless <project>` runs `tgcloud/`
+  JavaScript handlers and authenticated Mini App endpoints in Docker, with
+  the platform SDK and a shared SQLite database. Node.js stays in the
+  container; [serverless.md](docs/serverless.md) covers the runtime and its limits.
 - **Two ways in.** A single static binary for Linux, macOS and Windows, or a
   Go package to run in-process on `httptest`.
 
@@ -51,7 +58,7 @@ go install github.com/EvilFreelancer/tgfake/cmd/tgfake@latest
 In GitHub Actions, the [action](docs/ci.md) installs it and can start it:
 
 ```yaml
-- uses: EvilFreelancer/tgfake@v1.0.0   # installs the v1.0.0 binary
+- uses: EvilFreelancer/tgfake@v1.1.0   # installs the v1.1.0 binary
   with:
     start: "true"
     args: --llm
@@ -66,7 +73,7 @@ tgfake --llm
 ```
 
 ```text
-tgfake v1.0.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
+tgfake v1.1.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
   Bot API:    http://127.0.0.1:18790/bot<token>/<method>  (in place of https://api.telegram.org)
   chat page:  http://127.0.0.1:18790/
   sim API:    http://127.0.0.1:18790/sim/
@@ -142,6 +149,7 @@ GitHub Actions and the install script for everything else.
 | [docs/sim-api.md](docs/sim-api.md) | The simulation API: messages, taps, transcripts, the outbox, faults, Mini App launches, reset. |
 | [docs/mini-apps.md](docs/mini-apps.md) | `web_app` buttons, the menu button, signed launch data and the phone frame of the chat page. |
 | [docs/scripted-model.md](docs/scripted-model.md) | The OpenAI-compatible model of `--llm`: answers, rules, tool calls, streaming. |
+| [docs/serverless.md](docs/serverless.md) | Local tgcloud projects in Docker: handlers, SDK, SQLite, authenticated endpoints and Go tests. |
 | [docs/go.md](docs/go.md) | Using the packages from Go tests: `server`, `botapi`, `webapp`, `llmstub`. |
 | [docs/ci.md](docs/ci.md) | The GitHub Action, the install script and running the stand in other CI systems. |
 | [docs/development.md](docs/development.md) | Building, testing, the layout of the repository and cutting a release. |

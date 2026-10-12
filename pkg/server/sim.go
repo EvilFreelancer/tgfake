@@ -41,6 +41,14 @@ func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sim/fault", s.simFault)
 	mux.HandleFunc("DELETE /sim/fault", s.simClearFaults)
 	mux.HandleFunc("POST /sim/reset", s.simReset)
+	mux.HandleFunc("POST /sim/chat/configure", s.simConfigureChat)
+	mux.HandleFunc("POST /sim/inline", s.simInline)
+	mux.HandleFunc("GET /sim/inline", s.simInlineResults)
+	mux.HandleFunc("POST /sim/inline/choose", s.simChooseInline)
+	mux.HandleFunc("POST /sim/webapp/data", s.simWebAppData)
+	mux.HandleFunc("POST /sim/webapp/share", s.simSharePrepared)
+	mux.HandleFunc("POST /sim/media", s.simMedia)
+	mux.HandleFunc("POST /sim/user/profile", s.simUserProfile)
 }
 
 func (s *Server) simMessage(w http.ResponseWriter, r *http.Request) {

@@ -22,12 +22,18 @@ The repository is a composite action, `EvilFreelancer/tgfake`. It installs a rel
 
 | Input | Default | Meaning |
 |-------|---------|---------|
-| `version` | `""` | The release to install: a tag such as `v1.0.0`, or `latest`. Empty means the tag the action itself was used at, so `uses: EvilFreelancer/tgfake@v1.0.0` installs v1.0.0; when that ref is not a release tag, `latest`. |
+| `version` | `""` | The release to install: a tag such as `v1.0.0`, or `latest`. Empty means the tag the action itself was used at, so `uses: EvilFreelancer/tgfake@v1.1.0` installs v1.1.0; when that ref is not a release tag, `latest`. |
 | `install-dir` | `""` | Where the binary goes. Empty means `$RUNNER_TEMP/tgfake`. The directory is added to `PATH` for the following steps. |
 | `start` | `"false"` | `"true"` starts the server in the background and waits until it answers. |
 | `addr` | `127.0.0.1:18790` | The address the started server listens on. Port 0 picks a free one; the `url` output is read from the banner, so it names the port really taken, with a wildcard address (`:18790`, `0.0.0.0`) reached through `127.0.0.1`. |
 | `args` | `""` | More arguments for the started server, split on whitespace, for example `--llm --llm-script rules.json`. |
 | `download-base` | `""` | Fetch `<tag>/<asset>` from this base instead of the GitHub release downloads: a mirror, or a snapshot build under test. It does not work with `latest`, so the version has to be a tag. |
+| `serverless-project` | `""` | Local directory containing `tgcloud/`; requires `start: "true"` and a Linux Docker engine. |
+| `serverless-image` | `node:24-bookworm-slim` | Runtime image; the action pulls it if missing. |
+| `serverless-db` | `""` | SQLite file to retain; empty uses a temporary database. |
+| `serverless-migrate` | `"false"` | Explicitly create schema tables and indexes before serving. |
+| `serverless-token` | `123456:SERVERLESS` | Fake token used by the internal poller and Mini App signature checks. |
+| `serverless-timeout` | `10s` | Per-invocation timeout including container startup. |
 
 ### Outputs
 
@@ -41,12 +47,45 @@ The repository is a composite action, `EvilFreelancer/tgfake`. It installs a rel
 
 With `start: "true"` the action runs `tgfake --addr <addr> <args>` in the background, reads the origin from the banner and polls `GET /sim/state` every 0.2 s. If the process exits first (a busy port, a bad flag), or the server does not answer within 20 seconds, the step prints the log and fails. Once started, the server runs until the job ends.
 
+### Serverless projects
+
+On `ubuntu-latest`, run a checked-out `tgcloud/` project directly with the action. Node.js executes inside the container; the workflow needs no host Node.js installation or separate bot process. Pin the action to a release containing serverless support:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: EvilFreelancer/tgfake@<release-containing-serverless>
+  id: tgfake
+  with:
+    start: "true"
+    serverless-project: .
+    serverless-migrate: "true"
+- name: Exercise the project
+  env:
+    URL: ${{ steps.tgfake.outputs.url }}
+  run: |
+    set -eu
+    curl -sf -X POST "$URL/sim/message" \
+      -H 'Content-Type: application/json' -d '{"text":"hello"}' > /dev/null
+    for _ in $(seq 1 100); do
+      if curl -sf "$URL/sim/chat/4242?format=text" | grep -qF "I've seen 1 message(s)"; then exit 0; fi
+      sleep 0.1
+    done
+    exit 1
+- name: Stop tgfake
+  if: always() && steps.tgfake.outputs.pid != ''
+  env:
+    TGFAKE_PID: ${{ steps.tgfake.outputs.pid }}
+  run: kill "$TGFAKE_PID"
+```
+
+The assertion above is for [the counter example](../examples/serverless); use your project's expected answer. Project and database paths are passed as separate arguments, including paths with spaces. The action validates the project and pulls the image before starting its readiness timer. An omitted schema flag leaves the database untouched. Hosted macOS/Windows runners do not normally provide a Linux Docker engine; use Linux for this mode. See [serverless.md](serverless.md) for SDK coverage and local-runtime differences.
+
 ### Pinning a version
 
 Pin the action to a release tag and leave `version` out:
 
 ```yaml
-- uses: EvilFreelancer/tgfake@v1.0.0
+- uses: EvilFreelancer/tgfake@v1.1.0
 ```
 
 The action then installs the binary of that same release, and its install script is the one of that release too, so one tag in the workflow decides everything. The action takes the ref from `github.action_ref`, and when a runner leaves that empty, from the last element of the path the action was checked out to. A ref counts as a release when it is `v` followed by a digit and contains a dot, as `v1.0.0` and `v1.1.0-rc.1` do.
@@ -54,14 +93,14 @@ The action then installs the binary of that same release, and its install script
 `version` is for overriding that choice. It matters when the action is pinned by something that does not name a release, such as a commit SHA, a branch or a tag like `v0`: the action would install `latest`, which changes under the workflow. Name the release explicitly then:
 
 ```yaml
-- uses: EvilFreelancer/tgfake@<commit sha of v1.0.0>
+- uses: EvilFreelancer/tgfake@<commit sha of v1.1.0>
   with:
-    version: v1.0.0
+    version: v1.1.0
 ```
 
 ### A complete job
 
-The job below installs v1.0.0, starts it with the scripted model, starts the bot under test pointed at it, and runs the checks of `examples/shell/bot-e2e.sh`: a message is echoed, a tap on a button edits the message, and a flood-control fault is what the bot sees. The checks are written for the echo bot of [`examples/echobot`](../examples/echobot); replace `bot.py` and the checks with your own. `--poll-max 1s` matters: the first check waits for the bot's first `getUpdates` in the outbox, and a poll is recorded only when it is answered, which with the default would be 30 seconds later.
+The job below installs v1.1.0, starts it with the scripted model, starts the bot under test pointed at it, and runs the checks of `examples/shell/bot-e2e.sh`: a message is echoed, a tap on a button edits the message, and a flood-control fault is what the bot sees. The checks are written for the echo bot of [`examples/echobot`](../examples/echobot); replace `bot.py` and the checks with your own. `--poll-max 1s` matters: the first check waits for the bot's first `getUpdates` in the outbox, and a poll is recorded only when it is answered, which with the default would be 30 seconds later.
 
 ```yaml
 name: Bot end-to-end
@@ -78,7 +117,7 @@ jobs:
 
       - name: Start tgfake
         id: tgfake
-        uses: EvilFreelancer/tgfake@v1.0.0
+        uses: EvilFreelancer/tgfake@v1.1.0
         with:
           start: "true"
           args: --llm --llm-delay 0s --poll-max 1s
@@ -139,7 +178,7 @@ To run `bot-e2e.sh` itself, or a copy of it in your repository, install without 
 ```yaml
       - name: Install tgfake
         id: tgfake
-        uses: EvilFreelancer/tgfake@v1.0.0
+        uses: EvilFreelancer/tgfake@v1.1.0
 
       - name: End-to-end test
         env:
@@ -153,7 +192,7 @@ To run `bot-e2e.sh` itself, or a copy of it in your repository, install without 
 `scripts/install.sh` installs a release on any machine with a POSIX shell, which makes it the way in for GitLab CI, Jenkins, Buildkite, a developer's laptop and anything else:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/v1.0.0/scripts/install.sh | sh -s -- -b ./bin v1.0.0
+curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/v1.1.0/scripts/install.sh | sh -s -- -b ./bin v1.1.0
 ```
 
 ```text
@@ -178,7 +217,7 @@ The script downloads the archive of the platform and `checksums.txt`, and checks
 Progress goes to stderr, prefixed `tgfake install:`. The last line on stdout is the path of the installed binary, so a script can capture it:
 
 ```bash
-bin="$(curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/v1.0.0/scripts/install.sh | sh -s -- -b "$HOME/.local/bin" v1.0.0 | tail -n 1)"
+bin="$(curl -sSfL https://raw.githubusercontent.com/EvilFreelancer/tgfake/v1.1.0/scripts/install.sh | sh -s -- -b "$HOME/.local/bin" v1.1.0 | tail -n 1)"
 "$bin" --version
 ```
 
@@ -192,7 +231,7 @@ A job that installs a pinned release, then runs a copy of `examples/shell/bot-e2
 bot-e2e:
   image: python:3.12
   variables:
-    TGFAKE_VERSION: v1.0.0
+    TGFAKE_VERSION: v1.1.0
   before_script:
     - curl -sSfL -o install.sh "https://raw.githubusercontent.com/EvilFreelancer/tgfake/${TGFAKE_VERSION}/scripts/install.sh"
     - sh install.sh -b "$CI_PROJECT_DIR/bin" "$TGFAKE_VERSION"
@@ -214,7 +253,7 @@ for _ in $(seq 1 100); do curl -sf -o /dev/null http://127.0.0.1:18790/sim/state
 Where Go 1.22 or newer is at hand, the command can be built from the module instead of downloaded:
 
 ```bash
-go install github.com/EvilFreelancer/tgfake/cmd/tgfake@v1.0.0
+go install github.com/EvilFreelancer/tgfake/cmd/tgfake@v1.1.0
 ```
 
 The binary lands in `$(go env GOPATH)/bin` (or `GOBIN`) and reports the module version it was built at. A Go bot does not need the binary at all: its tests can run the stand in-process ([go.md](go.md)).
@@ -225,7 +264,7 @@ No container image is published yet. The release binaries are static, so one run
 
 ```dockerfile
 FROM alpine:3.20
-ARG TGFAKE_VERSION=v1.0.0
+ARG TGFAKE_VERSION=v1.1.0
 RUN apk add --no-cache curl \
  && curl -sSfL "https://raw.githubusercontent.com/EvilFreelancer/tgfake/${TGFAKE_VERSION}/scripts/install.sh" \
     | sh -s -- -b /usr/local/bin "${TGFAKE_VERSION}" \

@@ -12,10 +12,11 @@ in-process. `README.md` is the landing page; `docs/` is the reference.
 | Path | Responsibility |
 |------|----------------|
 | `cmd/tgfake` | The command: flags, the banner, `run(ctx, args, stdout, stderr)` (testable in-process, port 0 picks a free port), `--version` from `-X main.version` or the module version. `bdd_command_test.go` runs `features/command.feature` against `run`. |
-| `pkg/server` | The server: `Server` state under one mutex, the Bot API (`methods.go`: the method switch, parameter parsing, refusals), the update queue and long polling (`updates.go`), faults (`faults.go`), chats and their views (`chat.go`), menu buttons and Mini App launches (`webapp.go`), the simulation API under `/sim/` (`sim.go`), the response envelope (`response.go`). `Handler()` mounts the Bot API, `/sim/` and the chat page. |
+| `pkg/server` | The server: `Server` state under one mutex, Bot API dispatch/parsing (`methods.go`), media/downloads (`media.go`, `incoming_media.go`), copy/forward and location/contact sends (`relay.go`), inline/Mini App messages (`inline.go`), webhook delivery (`webhook.go`), configured chat/member/profile information (`information.go`), polling (`updates.go`), faults (`faults.go`), chats/views (`chat.go`), Mini App launches (`webapp.go`), simulation routes (`sim.go`), responses (`response.go`). `Handler()` mounts the Bot API, `/file/`, `/sim/` and the chat page. |
 | `pkg/botapi` | Wire types of the Bot API objects (`Update`, `Message`, `User`, `InlineKeyboardMarkup`, `MenuButton`, ...). Data only, no behaviour. |
 | `pkg/webapp` | Mini App launch data with no state: `Sign`, `Validate`, `ThemeParams`, `URLProblem`, `AppendLaunchParams`, the claimed version and platform. |
 | `pkg/llmstub` | The scripted model: `/v1/models` and `/v1/chat/completions`, rules, answers in turn, echo, tool-call rules, `StripTags`, streaming pace. |
+| `pkg/serverless` | Local tgcloud projects: JavaScript SDK and SQLite in Docker, invocation lifetimes, update polling and authenticated Mini App endpoints. Docker is optional outside this mode. |
 | `internal/chatpage` | The chat page, one self-contained HTML file embedded into the binary; it reads everything from the simulation API. |
 | `features/` | Gherkin specs of the happy paths, run by godog harnesses in the owning package (`pkg/server/bdd_*_test.go`, `cmd/tgfake/bdd_command_test.go`). |
 | `examples/echobot`, `examples/shell` | A standard-library bot with its in-process tests, and an any-language integration test driving the binary and a bot process with curl. |

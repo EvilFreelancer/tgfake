@@ -20,15 +20,6 @@ import (
 // app's side (core.telegram.org/bots/webapps, "Validating data received via
 // the Mini App") gets the answer it would get from Telegram.
 
-// webAppURLOf returns the address a web_app button opens, "" for any other
-// button.
-func webAppURLOf(b botapi.InlineKeyboardButton) string {
-	if b.WebApp == nil {
-		return ""
-	}
-	return b.WebApp.URL
-}
-
 // chatTypeLocked is the type of chat id: the one it has, or the one the
 // stand gives a chat it has not seen (a negative id is a group). It creates
 // nothing. Caller holds s.mu.
@@ -219,6 +210,7 @@ func (s *Server) LaunchWebApp(req WebAppLaunch) (LaunchedWebApp, error) {
 	s.nextQuery++
 	query := fmt.Sprintf("tgfake-%d", s.nextQuery)
 	authDate := s.now().Unix()
+	s.webQueries[query] = webQuery{chatID: in.ChatID, user: botapi.User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username}}
 	s.mu.Unlock()
 
 	data := url.Values{}

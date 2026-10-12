@@ -1,17 +1,11 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +31,9 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	method = strings.TrimSuffix(method, "/")
 	params := parseParams(r)
+	if r.MultipartForm != nil {
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
+	}
 	if s.opts.Token != "" && token != s.opts.Token {
 		s.writeError(w, method, params, http.StatusUnauthorized, "Unauthorized", 0)
 		return
@@ -65,6 +62,28 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.sendMedia(w, r, method, params, "photo")
 	case "senddocument":
 		s.sendMedia(w, r, method, params, "document")
+	case "sendvideo", "sendaudio", "sendvoice", "sendanimation", "sendvideonote":
+		field := strings.TrimPrefix(strings.ToLower(method), "send")
+		if field == "videonote" {
+			field = "video_note"
+		}
+		s.sendMedia(w, r, method, params, field)
+	case "getfile":
+		s.getFile(w, method, params)
+	case "sendmediagroup":
+		s.sendMediaGroup(w, r, method, params)
+	case "editmessagecaption", "editmessagemedia":
+		s.editMedia(w, r, method, params)
+	case "copymessage", "forwardmessage", "copymessages", "forwardmessages":
+		s.relayMessages(w, method, params)
+	case "deletemessages":
+		s.deleteMessages(w, method, params)
+	case "sendlocation", "sendvenue", "sendcontact":
+		s.sendContent(w, method, params)
+	case "answerinlinequery", "answerwebappquery", "savepreparedinlinemessage":
+		s.answerInline(w, r, method, params)
+	case "getchat", "getchatmember", "getchatmembercount", "getchatadministrators", "getuserprofilephotos":
+		s.chatInformation(w, method, params)
 	case "editmessagetext", "editmessagereplymarkup":
 		s.editMessage(w, method, params)
 	case "deletemessage":
@@ -81,11 +100,10 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.setChatMenuButton(w, method, params)
 	case "getchatmenubutton":
 		s.getChatMenuButton(w, method, params)
-	case "deletewebhook":
-		s.writeResult(w, method, params, true)
+	case "setwebhook", "deletewebhook":
+		s.setWebhook(w, r, method, params)
 	case "getwebhookinfo":
-		s.writeResult(w, method, params, map[string]any{"url": "", "has_custom_certificate": false,
-			"pending_update_count": s.PendingUpdates(), "allowed_updates": s.AllowedUpdates()})
+		s.webhookInfo(w, method, params)
 	default:
 		s.writeError(w, method, params, http.StatusNotFound, "Not Found: method not found", 0)
 	}
@@ -138,7 +156,7 @@ func (s *Server) me() map[string]any {
 		"username":                    s.opts.BotUsername,
 		"can_join_groups":             true,
 		"can_read_all_group_messages": false,
-		"supports_inline_queries":     false,
+		"supports_inline_queries":     s.opts.InlineMode,
 	}
 }
 
@@ -149,6 +167,13 @@ func (s *Server) me() map[string]any {
 // means every kind, and none at all (or the literal null some libraries
 // send) keeps whatever the previous poll asked for.
 func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request, method string, params url.Values) {
+	s.mu.Lock()
+	activeWebhook := s.webhook.url != ""
+	s.mu.Unlock()
+	if activeWebhook {
+		s.writeError(w, method, params, 409, "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first", 0)
+		return
+	}
 	offset := atoi(params.Get("offset"))
 	limit := atoi(params.Get("limit"))
 	if raw := strings.TrimSpace(params.Get("allowed_updates")); raw != "" && raw != "null" {
@@ -166,6 +191,11 @@ func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request, method strin
 	deadline := time.Now().Add(wait)
 	for {
 		s.mu.Lock()
+		if s.webhook.url != "" {
+			s.mu.Unlock()
+			s.writeError(w, method, params, 409, "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first", 0)
+			return
+		}
 		batch := s.takeUpdatesLocked(offset, limit)
 		wake := s.wake
 		s.mu.Unlock()
@@ -245,6 +275,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 		ReplyToMessage: quoted,
 	}
 	msg.ReplyMarkup = markup
+	msg.HasProtectedContent = params.Get("protect_content") == "true"
 	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
 	result := stored.clone()
 	s.mu.Unlock()
@@ -279,116 +310,21 @@ const (
 	documentMaxSize = 50 << 20
 )
 
-// sendMedia answers sendPhoto and sendDocument: the file arrives as the
-// first multipart part named by field, the chat and caption as ordinary
-// form fields. Only the upload variant exists: a file_id or a URL string in
-// place of the upload is refused as a request with no file in it.
-func (s *Server) sendMedia(w http.ResponseWriter, r *http.Request, method string, params url.Values, field string) {
-	chatID, ok := chatIDOf(params)
-	if !ok {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: chat_id is empty", 0)
-		return
-	}
-	var header *multipart.FileHeader
-	if r.MultipartForm != nil {
-		if headers := r.MultipartForm.File[field]; len(headers) > 0 {
-			header = headers[0]
-		}
-	}
-	if header == nil {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: there is no "+field+" in the request", 0)
-		return
-	}
-	limit := int64(documentMaxSize)
-	if field == "photo" {
-		limit = photoMaxSize
-	}
-	part, err := header.Open()
-	if err != nil {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: there is no "+field+" in the request", 0)
-		return
-	}
-	data, err := io.ReadAll(io.LimitReader(part, limit+1))
-	_ = part.Close()
-	if err != nil {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't read the "+field, 0)
-		return
-	}
-	if int64(len(data)) > limit {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: file is too big", 0)
-		return
-	}
-	caption := params.Get("caption")
-	if utf8.RuneCountInString(caption) > mediaCaptionMax {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message caption is too long", 0)
-		return
-	}
-	markup, problem := s.keyboardFor(chatID, params)
-	if problem != "" {
-		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
-		return
-	}
-	var cfg image.Config
-	if field == "photo" {
-		var err error
-		cfg, _, err = image.DecodeConfig(bytes.NewReader(data))
-		if err != nil {
-			s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: IMAGE_PROCESS_FAILED", 0)
-			return
-		}
-	}
-	mimeType, _, _ := strings.Cut(http.DetectContentType(data), ";")
-	params.Set(field, fmt.Sprintf("%s (%d bytes)", header.Filename, len(data)))
-	s.mu.Lock()
-	chat := s.ensureChatLocked(chatID, "", "", nil)
-	quoted, problem := replyTargetLocked(chat, params)
-	if problem != "" {
-		s.mu.Unlock()
-		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
-		return
-	}
-	s.nextFileID++
-	id := "file_" + strconv.Itoa(s.nextFileID)
-	f := &storedFile{id: id, name: header.Filename, mimeType: mimeType, data: data, width: cfg.Width, height: cfg.Height}
-	s.files[id] = f
-	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: caption, ReplyToMessage: quoted, ReplyMarkup: markup}
-	if field == "photo" {
-		msg.Photo = []botapi.PhotoSize{{FileID: id, FileUniqueID: "u" + id, Width: cfg.Width, Height: cfg.Height, FileSize: len(data)}}
-	} else {
-		msg.Document = &botapi.Document{FileID: id, FileUniqueID: "u" + id, FileName: header.Filename, MimeType: mimeType, FileSize: len(data)}
-	}
-	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
-	stored.file = f
-	result := stored.clone()
-	s.mu.Unlock()
-	s.writeResult(w, method, params, result)
-}
-
 func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Values) {
-	chatID, ok := chatIDOf(params)
-	if !ok {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: chat_id is empty", 0)
-		return
-	}
-	msgID := atoi(params.Get("message_id"))
 	s.mu.Lock()
-	chat := s.chats[chatID]
-	var target *storedMessage
-	if chat != nil {
-		target = chat.byID[msgID]
-	}
-	if target == nil || target.deleted {
+	target, inline, problem := s.editTargetLocked(params)
+	if problem != "" {
 		s.mu.Unlock()
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message to edit not found", 0)
-		return
-	}
-	if !target.fromBot {
-		s.mu.Unlock()
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message can't be edited", 0)
+		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
 	}
 	newText := target.msg.Text
 	if strings.EqualFold(method, "editMessageText") {
+		if target.file != nil || target.msg.Location != nil || target.msg.Contact != nil {
+			s.mu.Unlock()
+			s.writeError(w, method, params, 400, "Bad Request: there is no text in the message to edit", 0)
+			return
+		}
 		newText = params.Get("text")
 		if newText == "" {
 			s.mu.Unlock()
@@ -403,7 +339,7 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 	}
 	newMarkup, problem := parseKeyboard(params.Get("reply_markup"))
 	if problem == "" {
-		problem = validateKeyboard(newMarkup, chat.typ)
+		problem = validateKeyboard(newMarkup, target.msg.Chat.Type)
 	}
 	if problem != "" {
 		s.mu.Unlock()
@@ -425,7 +361,11 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 	}
 	result := target.clone()
 	s.mu.Unlock()
-	s.writeResult(w, method, params, result)
+	if inline {
+		s.writeResult(w, method, params, true)
+	} else {
+		s.writeResult(w, method, params, result)
+	}
 }
 
 func (s *Server) deleteMessage(w http.ResponseWriter, method string, params url.Values) {
@@ -535,6 +475,7 @@ func (s *Server) sendRichMessage(w http.ResponseWriter, method string, params ur
 		ReplyToMessage: quoted,
 		ReplyMarkup:    markup,
 	}
+	msg.HasProtectedContent = params.Get("protect_content") == "true"
 	stored := chat.appendLocked(msg, true, "", true)
 	result := stored.clone()
 	s.mu.Unlock()
@@ -699,7 +640,7 @@ func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string) string {
 	for _, row := range kb.InlineKeyboard {
 		for _, b := range row {
 			actions := 0
-			for _, set := range []bool{b.CallbackData != "", b.URL != "", b.WebApp != nil} {
+			for _, set := range []bool{b.CallbackData != "", b.URL != "", b.WebApp != nil, b.SwitchInlineQuery != nil, b.SwitchInlineQueryCurrentChat != nil, b.CopyText != nil} {
 				if set {
 					actions++
 				}
@@ -714,6 +655,9 @@ func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string) string {
 			}
 			if len(b.CallbackData) > callbackDataMax {
 				return "Bad Request: BUTTON_DATA_INVALID"
+			}
+			if b.CopyText != nil && (utf8.RuneCountInString(b.CopyText.Text) < 1 || utf8.RuneCountInString(b.CopyText.Text) > 256) {
+				return "Bad Request: BUTTON_COPY_TEXT_INVALID"
 			}
 			if b.WebApp != nil {
 				if chatType != "private" {
@@ -741,8 +685,7 @@ func sameKeyboard(a, b *botapi.InlineKeyboardMarkup) bool {
 		}
 		for j := range a.InlineKeyboard[i] {
 			x, y := a.InlineKeyboard[i][j], b.InlineKeyboard[i][j]
-			if x.Text != y.Text || x.CallbackData != y.CallbackData || x.URL != y.URL || webAppURLOf(x) != webAppURLOf(y) ||
-				(x.WebApp == nil) != (y.WebApp == nil) {
+			if !reflect.DeepEqual(x, y) {
 				return false
 			}
 		}

@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -49,6 +50,11 @@ type Options struct {
 	AllowedUpdates []string
 	// Logf, when set, receives one line per Bot API call.
 	Logf func(format string, args ...any)
+	// HTTPClient is used for media URL downloads and webhook delivery. Nil
+	// uses a client with a ten-second timeout.
+	HTTPClient *http.Client
+	// InlineMode is the BotFather inline-mode setting getMe reports.
+	InlineMode bool
 }
 
 // The bot a Server with no options plays.
@@ -73,14 +79,19 @@ type Call struct {
 	Response json.RawMessage   `json:"response"`
 }
 
-// storedFile is a file the bot uploaded with sendPhoto or sendDocument.
+// storedFile is incoming or outgoing media retained by the stand.
 type storedFile struct {
-	id       string
-	name     string
-	mimeType string
-	data     []byte
-	width    int
-	height   int
+	id        string
+	name      string
+	mimeType  string
+	data      []byte
+	width     int
+	height    int
+	kind      string
+	duration  int
+	length    int
+	performer string
+	title     string
 }
 
 // Server is the fake Bot API. Every method is safe for concurrent use.
@@ -106,10 +117,21 @@ type Server struct {
 
 	// token is the one in the path of the latest Bot API call: what launch
 	// data is signed with when Options.Token is not set.
-	token       string
-	defaultMenu *botapi.MenuButton           // the bot's menu button; nil shows its commands
-	chatMenus   map[int64]*botapi.MenuButton // private chats' own menu buttons
-	nextQuery   int                          // numbers the query_id of Mini App launches
+	token          string
+	defaultMenu    *botapi.MenuButton           // the bot's menu button; nil shows its commands
+	chatMenus      map[int64]*botapi.MenuButton // private chats' own menu buttons
+	nextQuery      int                          // numbers the query_id of Mini App launches
+	webQueries     map[string]webQuery
+	inlineQueries  map[string]*inlineQueryState
+	inlineMessages map[string]*storedMessage
+	prepared       map[string]preparedMessage
+	profiles       map[int64]botapi.UserProfilePhotos
+	nextInline     int
+	nextAlbum      int
+	webhook        webhookState
+	webhookDone    chan struct{}
+	networkCtx     context.Context
+	stopNetwork    context.CancelFunc
 }
 
 // New returns a Server with nothing in it.
@@ -126,19 +148,31 @@ func New(opts Options) *Server {
 	if opts.MaxPollWait <= 0 {
 		opts.MaxPollWait = defaultMaxPollWait
 	}
-	return &Server{
-		opts:       opts,
-		nextUpdate: 1,
-		allowed:    append([]string(nil), opts.AllowedUpdates...),
-		wake:       make(chan struct{}),
-		closing:    make(chan struct{}),
-		chats:      map[int64]*chatState{},
-		faults:     map[string]*Fault{},
-		cbqChat:    map[string]int64{},
-		files:      map[string]*storedFile{},
-		now:        time.Now,
-		chatMenus:  map[int64]*botapi.MenuButton{},
+	if opts.HTTPClient == nil {
+		opts.HTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
+	s := &Server{
+		opts:           opts,
+		nextUpdate:     1,
+		allowed:        append([]string(nil), opts.AllowedUpdates...),
+		wake:           make(chan struct{}),
+		closing:        make(chan struct{}),
+		chats:          map[int64]*chatState{},
+		faults:         map[string]*Fault{},
+		cbqChat:        map[string]int64{},
+		files:          map[string]*storedFile{},
+		now:            time.Now,
+		chatMenus:      map[int64]*botapi.MenuButton{},
+		webQueries:     map[string]webQuery{},
+		inlineQueries:  map[string]*inlineQueryState{},
+		inlineMessages: map[string]*storedMessage{},
+		prepared:       map[string]preparedMessage{},
+		webhookDone:    make(chan struct{}),
+		profiles:       map[int64]botapi.UserProfilePhotos{},
+	}
+	s.networkCtx, s.stopNetwork = context.WithCancel(context.Background())
+	go s.deliverWebhooks()
+	return s
 }
 
 // Handler serves the Bot API under /bot<token>/<method>, the simulation API
@@ -146,6 +180,7 @@ func New(opts Options) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerSim(mux)
+	mux.HandleFunc("GET /file/", s.serveFile)
 	mux.HandleFunc("/{$}", chatpage.Serve)
 	mux.HandleFunc("/", s.serveBotAPI)
 	return mux
@@ -155,7 +190,16 @@ func (s *Server) Handler() http.Handler {
 // front of the fake can shut down without waiting for a poll to time out.
 // Call it before httptest.Server.Close.
 func (s *Server) Close() {
-	s.closeOnce.Do(func() { close(s.closing) })
+	s.closeOnce.Do(func() {
+		close(s.closing)
+		s.stopNetwork()
+		s.mu.Lock()
+		if s.webhook.cancel != nil {
+			s.webhook.cancel()
+		}
+		s.mu.Unlock()
+		<-s.webhookDone
+	})
 }
 
 // Reset forgets the chats, the outbox, the faults, the commands, the menu
@@ -179,6 +223,11 @@ func (s *Server) Reset() {
 	s.nextFileID = 0
 	s.defaultMenu = nil
 	s.chatMenus = map[int64]*botapi.MenuButton{}
+	s.webQueries = map[string]webQuery{}
+	s.inlineQueries = map[string]*inlineQueryState{}
+	s.inlineMessages = map[string]*storedMessage{}
+	s.prepared = map[string]preparedMessage{}
+	s.profiles = map[int64]botapi.UserProfilePhotos{}
 	s.wakeLocked()
 }
 

@@ -8,6 +8,7 @@ This page is for contributors: how the repository is laid out, the `make` target
 - [golangci-lint](https://golangci-lint.run) v2 for `make lint`; CI runs v2.12.2.
 - [GoReleaser](https://goreleaser.com) v2 for `make snapshot` and `make release-check`.
 - `python3` and `curl` for `make install-test`, which serves the snapshot archives with `python3 -m http.server`.
+- A local Linux Docker engine and `docker pull node:24-bookworm-slim` for serverless integration tests. `TGFAKE_TEST_DOCKER=1` requires these tests instead of skipping them when Docker or the image is unavailable. Linux CI enables it.
 
 The packages and the command import nothing outside the standard library. The one module requirement, `github.com/cucumber/godog`, is used by tests only.
 
@@ -20,9 +21,11 @@ The packages and the command import nothing outside the standard library. The on
 | [`pkg/botapi`](../pkg/botapi) | The wire types of the Bot API objects. |
 | [`pkg/webapp`](../pkg/webapp) | Mini App launch data without state: signing, validation, theme parameters, the address rule. |
 | [`pkg/llmstub`](../pkg/llmstub) | The scripted OpenAI-compatible model. |
+| [`pkg/serverless`](../pkg/serverless) | Local tgcloud module execution in Docker, the embedded JavaScript SDK, SQLite, update polling and authenticated endpoints. |
 | [`internal/chatpage`](../internal/chatpage) | The chat page: one self-contained HTML file embedded into the binary, which reads everything from the simulation API. |
 | [`features/`](../features) | Gherkin specs of the happy paths, run by godog harnesses in the packages. |
 | [`examples/echobot`](../examples/echobot) | A standard-library bot and its in-process tests. |
+| [`examples/serverless`](../examples/serverless) | A tgcloud counter project with a handler, schema and Mini App endpoint. |
 | [`examples/shell/bot-e2e.sh`](../examples/shell/bot-e2e.sh) | An integration test for a bot in any language: the binary, a bot process and curl. |
 | [`scripts/install.sh`](../scripts/install.sh) | The release installer ([ci.md](ci.md#the-install-script)). |
 | [`scripts/test-install.sh`](../scripts/test-install.sh) | Checks the installer against a snapshot build served from a local mirror, including a tampered checksum. |
@@ -31,6 +34,8 @@ The packages and the command import nothing outside the standard library. The on
 | [`.github/workflows/ci.yaml`](../.github/workflows/ci.yaml) | Tests, lint and the release path on every pull request and push to `main`. |
 | [`.github/workflows/release.yaml`](../.github/workflows/release.yaml) | Publishes a release when a `vX.Y.Z` tag is pushed. |
 | [`docs/`](.) | This reference. [`README.md`](../README.md) is the landing page and links every page. |
+
+Inside `pkg/server`, `media.go` owns media sends/edits and authenticated downloads, `incoming_media.go` incoming files, `relay.go` copies/forwards and static contact/location sends, `inline.go` inline and Mini App messages, `information.go` configurable chat/member/profile information, and `webhook.go` the delivery worker. Network requests use `Options.HTTPClient` and are cancelled on `Close`.
 
 The release asset names are spelled the same way in `.goreleaser.yaml`, `scripts/install.sh`, `action.yml` and [ci.md](ci.md): renaming them in one place means renaming them in all of them.
 
@@ -61,6 +66,8 @@ The happy path of a feature is a Gherkin scenario in `features/`, and a godog ha
 | [`features/command.feature`](../features/command.feature) | [`cmd/tgfake/bdd_command_test.go`](../cmd/tgfake/bdd_command_test.go), against `run` on a free port. |
 | [`features/update_lifecycle.feature`](../features/update_lifecycle.feature) | [`pkg/server/bdd_lifecycle_test.go`](../pkg/server/bdd_lifecycle_test.go), with the server's clock under the test's control. |
 | [`features/mini_app.feature`](../features/mini_app.feature) | [`pkg/server/bdd_mini_app_test.go`](../pkg/server/bdd_mini_app_test.go). |
+| [`features/bot_capabilities.feature`](../features/bot_capabilities.feature) | [`pkg/server/bdd_capabilities_test.go`](../pkg/server/bdd_capabilities_test.go), covering file downloads, inline selection, prepared sharing, webhooks and membership information. |
+| [`features/serverless.feature`](../features/serverless.feature) | [`pkg/serverless/bdd_serverless_test.go`](../pkg/serverless/bdd_serverless_test.go), against the Docker runtime and counter example. |
 
 Edge cases and refusals are ordinary unit tests next to the code: `pkg/server/*_test.go` for the Bot API, the update queue, media, drafts and the simulation API, `pkg/llmstub/llmstub_test.go`, `pkg/webapp/webapp_test.go` (including a known signing vector), `internal/chatpage/page_test.go`, which holds the page to having no outside asset, and `cmd/tgfake/main_test.go`. `go test ./...` also runs the tests of `examples/echobot`, so the example stays a working bot.
 

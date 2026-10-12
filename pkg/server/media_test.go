@@ -167,13 +167,12 @@ func TestSendPhotoHonoursAScheduledFault(t *testing.T) {
 	}
 }
 
-// A photo named by a file_id or a URL is a variant the fake does not keep:
-// it is a request with no file in it, not a method the fake does not know.
-func TestSendPhotoWithoutAnUploadIsRefusedAsHavingNoFile(t *testing.T) {
+// Unknown remote ids cannot be reused, even though known file ids are accepted.
+func TestSendPhotoWithAnUnknownFileIDIsRefused(t *testing.T) {
 	st := newStand(t, Options{})
 	code, out := st.call("sendPhoto", url.Values{"chat_id": {"42"}, "photo": {"AgACAgIAAxkBAAIBY2"}})
-	if code != http.StatusBadRequest || !strings.Contains(out["description"].(string), "no photo") {
-		t.Fatalf("sendPhoto without an upload = %d %v, want 400 naming the missing photo", code, out)
+	if code != http.StatusBadRequest || out["description"] != "Bad Request: wrong file_id or the file is temporarily unavailable" {
+		t.Fatalf("sendPhoto with an unknown file id = %d %v", code, out)
 	}
 }
 

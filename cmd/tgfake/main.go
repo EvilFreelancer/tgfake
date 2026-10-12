@@ -26,6 +26,7 @@ import (
 
 	"github.com/EvilFreelancer/tgfake/pkg/llmstub"
 	"github.com/EvilFreelancer/tgfake/pkg/server"
+	"github.com/EvilFreelancer/tgfake/pkg/serverless"
 )
 
 // version is set at link time by the release build (-X main.version=...).
@@ -54,7 +55,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	botName := fs.String("bot-name", server.DefaultBotFirstName, "the bot's first name, as getMe and its messages report it")
 	pollMax := fs.Duration("poll-max", 30*time.Second, "longest a getUpdates request is held open")
 	verbose := fs.Bool("verbose", false, "print every Bot API call")
+	inlineMode := fs.Bool("inline", false, "enable the bot's inline mode, as in BotFather")
 	showVersion := fs.Bool("version", false, "print the version and exit")
+	project := fs.String("serverless", "", "local project containing tgcloud/; run JavaScript in Docker")
+	dockerImage := fs.String("serverless-image", serverless.DefaultDockerImage, "Docker image providing Node.js and node:sqlite; pull it first")
+	database := fs.String("serverless-db", "", "SQLite file; empty uses a temporary database")
+	migrate := fs.Bool("serverless-migrate", false, "explicitly create serverless schema tables and indexes at startup")
+	invocationTimeout := fs.Duration("serverless-timeout", 10*time.Second, "maximum duration of a serverless invocation, including container startup")
 
 	llm := fs.Bool("llm", false, "also serve a scripted OpenAI-compatible model under /v1")
 	llmModel := fs.String("llm-model", llmstub.DefaultModel, "model id the scripted model reports")
@@ -85,8 +92,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		_, err := fmt.Fprintf(stdout, "tgfake %s\n", currentVersion())
 		return err
 	}
+	if *project == "" {
+		var orphan string
+		fs.Visit(func(f *flag.Flag) {
+			if orphan == "" && strings.HasPrefix(f.Name, "serverless-") {
+				orphan = f.Name
+			}
+		})
+		if orphan != "" {
+			return fmt.Errorf("--%s requires --serverless", orphan)
+		}
+	} else if *token == "" {
+		*token = "123456:SERVERLESS"
+	}
 
-	opts := server.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax}
+	opts := server.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax, InlineMode: *inlineMode}
 	if *verbose {
 		opts.Logf = log.New(stderr, "", log.LstdFlags).Printf
 	}
@@ -107,16 +127,63 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Handler: newMux(fake, stub), ReadHeaderTimeout: 10 * time.Second}
+	defer func() { _ = ln.Close() }()
+	origin := "http://" + ln.Addr().String()
+	apiOrigin := strings.ReplaceAll(strings.ReplaceAll(origin, "//0.0.0.0:", "//127.0.0.1:"), "//[::]:", "//127.0.0.1:")
+	handler := newMux(fake, stub)
+	var cloud *serverless.Runtime
+	if *project != "" {
+		cloud, err = serverless.New(serverless.Options{
+			ProjectDir: *project, APIURL: apiOrigin, Token: *token,
+			DockerImage: *dockerImage, DatabasePath: *database, Timeout: *invocationTimeout,
+			Logf: log.New(stderr, "", log.LstdFlags).Printf,
+		})
+		if err != nil {
+			fake.Close()
+			return err
+		}
+		defer cloud.Close()
+		if *migrate {
+			if err := cloud.Migrate(ctx); err != nil {
+				fake.Close()
+				return err
+			}
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/api/", cloud.Handler())
+		mux.Handle("/", handler)
+		handler = mux
+	}
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	printBanner(stdout, "http://"+ln.Addr().String(), *botUsername, stub)
 
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
+	pollCtx, stopPoll := context.WithCancel(ctx)
+	defer stopPoll()
+	polled := make(chan error, 1)
+	if cloud != nil {
+		go func() { polled <- cloud.Poll(pollCtx) }()
+	}
+	var pollErr error
 	select {
 	case err := <-served:
+		stopPoll()
 		fake.Close()
+		if cloud != nil {
+			cloud.Close()
+			<-polled
+		}
 		return err
+	case pollErr = <-polled:
 	case <-ctx.Done():
+	}
+	stopPoll()
+	if cloud != nil {
+		cloud.Close()
+		if pollErr == nil {
+			<-polled
+		}
 	}
 	// Release the long polls first, then let the listener drain.
 	fake.Close()
@@ -127,6 +194,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	if pollErr != nil && ctx.Err() == nil {
+		return pollErr
 	}
 	return nil
 }

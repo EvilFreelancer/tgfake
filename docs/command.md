@@ -20,6 +20,7 @@ Flags are parsed by Go's `flag` package, so `-addr` and `--addr` are the same fl
 | `--token` | empty | The only bot token accepted in `/bot<token>/` paths. Empty accepts any token. When set, a call with any other token is answered `401 Unauthorized`, and Mini App launch data is signed with this token. |
 | `--bot-username` | `tgfake_bot` | The username `getMe` reports and the bot's messages carry. A group message that mentions the bot uses it. |
 | `--bot-name` | `tgfake` | The bot's first name, as `getMe` and the bot's own messages report it. |
+| `--inline` | off | Enable inline query simulation and report `supports_inline_queries=true` in `getMe`, like enabling inline mode through BotFather. |
 | `--poll-max` | `30s` | The longest a `getUpdates` request is held open, whatever `timeout` the bot asks for. A call reaches the outbox when it is answered, so a short value such as `1s` lets a test see an idle bot's polls without waiting 30 seconds. |
 | `--verbose` | off | Print one line per Bot API call to stderr. |
 | `--version` | off | Print the version and exit. |
@@ -64,12 +65,26 @@ These flags configure the model described in [scripted-model.md](scripted-model.
 | `--llm-chunk-words` | `1` | Words per streamed chunk. |
 | `--llm-strip-tag` | none | A tag whose `<tag>...</tag>` blocks a client appends to user messages and the model ignores. Repeatable. |
 
+## Serverless flags
+
+These flags run a local Telegram Serverless project as described in [serverless.md](serverless.md). Docker with Linux containers and a pre-pulled image is required. A `--serverless-*` option without `--serverless` is an error.
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--serverless` | empty | Project directory containing `tgcloud/`; enable JavaScript handlers and `/api/` endpoints in Docker. |
+| `--serverless-image` | `node:24-bookworm-slim` | Runtime image providing Node.js and built-in SQLite; pull it before starting. |
+| `--serverless-db` | empty | SQLite file to retain between runs. Empty creates a temporary database removed on shutdown. |
+| `--serverless-migrate` | off | Explicitly create new schema tables and indexes at startup. Existing-column changes require a manual migration. |
+| `--serverless-timeout` | `10s` | Maximum invocation time, including container startup. |
+
+In this mode an omitted `--token` becomes `123456:SERVERLESS`; this token authenticates the internal poller and signs endpoint init data. The command cancels invocations and forcibly removes their containers when stopped. Serverless logs go to stderr. A polling transport error stops the command with an error; a handler exception is logged and consumed.
+
 ## The banner
 
 Once the listener is bound the command prints a banner to stdout:
 
 ```text
-tgfake v1.0.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
+tgfake v1.1.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
   Bot API:    http://127.0.0.1:18790/bot<token>/<method>  (in place of https://api.telegram.org)
   chat page:  http://127.0.0.1:18790/
   sim API:    http://127.0.0.1:18790/sim/

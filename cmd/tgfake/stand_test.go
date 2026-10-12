@@ -47,12 +47,20 @@ var originRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+`)
 // for the banner to name its origin. The run is stopped by the test's cleanup.
 func startCommand(t *testing.T, args ...string) *command {
 	t.Helper()
+	return startCommandWithin(t, 5*time.Second, args...)
+}
+
+// startCommandWithin is startCommand for a start that does more before its
+// banner: the serverless mode checks Docker and runs the migrations in a
+// container first, which takes longer than 5 s on a loaded CI runner.
+func startCommandWithin(t *testing.T, wait time.Duration, args ...string) *command {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &command{t: t, out: &syncBuffer{}, cancel: cancel, done: make(chan error, 1)}
 	args = append([]string{"--addr", "127.0.0.1:0", "--poll-max", "200ms"}, args...)
 	go func() { c.done <- run(ctx, args, c.out, io.Discard) }()
 	t.Cleanup(func() { _ = c.stop() })
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		if origin := originRe.FindString(c.out.String()); origin != "" {
 			c.origin = origin
