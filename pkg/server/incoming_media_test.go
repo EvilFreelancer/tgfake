@@ -3,11 +3,32 @@ package server
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
+	"image/png"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+// pngHeader is a PNG of a few dozen bytes that declares a w x h picture: the
+// signature, a valid IHDR and IEND, no pixels.
+func pngHeader(w, h uint32) []byte {
+	chunk := func(kind string, data []byte) []byte {
+		var out []byte
+		out = binary.BigEndian.AppendUint32(out, uint32(len(data)))
+		body := append([]byte(kind), data...)
+		out = append(out, body...)
+		return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(body))
+	}
+	ihdr := binary.BigEndian.AppendUint32(nil, w)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, h)
+	ihdr = append(ihdr, 8, 2, 0, 0, 0) // 8-bit RGB
+	out := []byte("\x89PNG\r\n\x1a\n")
+	out = append(out, chunk("IHDR", ihdr)...)
+	return append(out, chunk("IEND", nil)...)
+}
 
 // pollMessage takes the pending updates and returns the message of the last.
 func (s *stand) pollMessage() map[string]any {
@@ -41,6 +62,20 @@ func TestInjectMediaRefusesWhatAClientCannotSend(t *testing.T) {
 	}
 	if s.fake.PendingUpdates() != 0 || len(s.fake.Chats()) != 0 {
 		t.Errorf("a refused file left %d updates and %d chats", s.fake.PendingUpdates(), len(s.fake.Chats()))
+	}
+}
+
+// A few dozen bytes can declare a picture whose pixels take gigabytes: a
+// photo is refused on its header when its sides add up to more than Telegram
+// takes, before anything is decoded.
+func TestInjectMediaRefusesAPhotoTooLargeOnItsHeader(t *testing.T) {
+	s := newStand(t, Options{})
+	if cfg, err := png.DecodeConfig(bytes.NewReader(pngHeader(9000, 9000))); err != nil || cfg.Width != 9000 {
+		t.Fatalf("the test header does not read as a PNG: %+v %v", cfg, err)
+	}
+	_, _, err := s.fake.InjectMedia(IncomingMedia{Type: "photo", Data: pngHeader(9000, 9000)})
+	if err == nil || !strings.Contains(err.Error(), "at most 10000") {
+		t.Fatalf("a 9000x9000 photo: %v, want a refusal naming the 10000 limit", err)
 	}
 }
 

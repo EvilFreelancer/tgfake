@@ -150,6 +150,7 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 | other media upload | 50 MiB. |
 | URL download | 5 MiB for photos, 20 MiB for other media. |
 | `getFile` download | 20 MiB. |
+| a photo the person sends | width and height adding up to at most 10000 pixels. |
 | media album | At most 10 items; the Bot API server also accepts a singleton. |
 | `message_ids` array | 1 to 100 ids. |
 | inline results | At most 50; result ids contain 1 to 64 bytes. |

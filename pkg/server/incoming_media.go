@@ -38,6 +38,10 @@ type IncomingMedia struct {
 	Length       int    `json:"length,omitempty"`
 }
 
+// photoMaxSides is Telegram's limit on a photo: its width and height add up
+// to at most 10000 pixels.
+const photoMaxSides = 10000
+
 // thumbnailEdge is the long side of the smallest size Telegram gives an
 // incoming photo, its "s" thumbnail.
 const thumbnailEdge = 90
@@ -83,6 +87,16 @@ func (s *Server) InjectMedia(in IncomingMedia) (int, int, error) {
 	}
 	var thumb *storedFile
 	if in.Type == "photo" {
+		// The header first: a small file can declare a picture whose pixels
+		// would take gigabytes, and Telegram refuses a photo whose sides add up
+		// to more than photoMaxSides anyway.
+		config, _, err := image.DecodeConfig(bytes.NewReader(file.data))
+		if err != nil {
+			return 0, 0, fmt.Errorf("photo cannot be decoded: %w", err)
+		}
+		if config.Width+config.Height > photoMaxSides {
+			return 0, 0, fmt.Errorf("photo is %dx%d; its width and height must add up to at most %d", config.Width, config.Height, photoMaxSides)
+		}
 		img, _, err := image.Decode(bytes.NewReader(file.data))
 		if err != nil {
 			return 0, 0, fmt.Errorf("photo cannot be decoded: %w", err)
