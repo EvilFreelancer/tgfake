@@ -28,6 +28,12 @@ The repository is a composite action, `EvilFreelancer/tgfake`. It installs a rel
 | `addr` | `127.0.0.1:18790` | The address the started server listens on. Port 0 picks a free one; the `url` output is read from the banner, so it names the port really taken, with a wildcard address (`:18790`, `0.0.0.0`) reached through `127.0.0.1`. |
 | `args` | `""` | More arguments for the started server, split on whitespace, for example `--llm --llm-script rules.json`. |
 | `download-base` | `""` | Fetch `<tag>/<asset>` from this base instead of the GitHub release downloads: a mirror, or a snapshot build under test. It does not work with `latest`, so the version has to be a tag. |
+| `serverless-project` | `""` | Local directory containing `tgcloud/`; requires `start: "true"` and a Linux Docker engine. |
+| `serverless-image` | `node:24-bookworm-slim` | Runtime image; the action pulls it if missing. |
+| `serverless-db` | `""` | SQLite file to retain; empty uses a temporary database. |
+| `serverless-migrate` | `"false"` | Explicitly create schema tables and indexes before serving. |
+| `serverless-token` | `123456:SERVERLESS` | Fake token used by the internal poller and Mini App signature checks. |
+| `serverless-timeout` | `10s` | Per-invocation timeout including container startup. |
 
 ### Outputs
 
@@ -40,6 +46,39 @@ The repository is a composite action, `EvilFreelancer/tgfake`. It installs a rel
 | `pid` | The process id of the started server, for a step that wants to stop it with `kill`; empty unless `start` is `"true"`. |
 
 With `start: "true"` the action runs `tgfake --addr <addr> <args>` in the background, reads the origin from the banner and polls `GET /sim/state` every 0.2 s. If the process exits first (a busy port, a bad flag), or the server does not answer within 20 seconds, the step prints the log and fails. Once started, the server runs until the job ends.
+
+### Serverless projects
+
+On `ubuntu-latest`, run a checked-out `tgcloud/` project directly with the action. Node.js executes inside the container; the workflow needs no host Node.js installation or separate bot process. Pin the action to a release containing serverless support:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: EvilFreelancer/tgfake@<release-containing-serverless>
+  id: tgfake
+  with:
+    start: "true"
+    serverless-project: .
+    serverless-migrate: "true"
+- name: Exercise the project
+  env:
+    URL: ${{ steps.tgfake.outputs.url }}
+  run: |
+    set -eu
+    curl -sf -X POST "$URL/sim/message" \
+      -H 'Content-Type: application/json' -d '{"text":"hello"}' > /dev/null
+    for _ in $(seq 1 100); do
+      if curl -sf "$URL/sim/chat/4242?format=text" | grep -qF "I've seen 1 message(s)"; then exit 0; fi
+      sleep 0.1
+    done
+    exit 1
+- name: Stop tgfake
+  if: always() && steps.tgfake.outputs.pid != ''
+  env:
+    TGFAKE_PID: ${{ steps.tgfake.outputs.pid }}
+  run: kill "$TGFAKE_PID"
+```
+
+The assertion above is for [the counter example](../examples/serverless); use your project's expected answer. Project and database paths are passed as separate arguments, including paths with spaces. The action validates the project and pulls the image before starting its readiness timer. An omitted schema flag leaves the database untouched. Hosted macOS/Windows runners do not normally provide a Linux Docker engine; use Linux for this mode. See [serverless.md](serverless.md) for SDK coverage and local-runtime differences.
 
 ### Pinning a version
 

@@ -37,6 +37,10 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | `DELETE /sim/fault` | Clear every fault. |
 | `POST /sim/reset` | Forget the chats, the outbox, the faults and the rest of the session. |
 
+## Serverless endpoints
+
+With `--serverless`, the command also serves `POST /api/<name>` for a project's Mini App endpoints. These use the official `Authorization: TMA <base64(initData)>` header and the `{ok,result}` envelope, rather than the simulation API conventions. See [serverless.md](serverless.md#mini-app-endpoints) for input validation, errors and context. Injecting messages and callbacks through `/sim/` delivers them to the project's corresponding handlers; `POST /sim/reset` leaves its SQLite database intact.
+
 ## POST /sim/message
 
 The person types a message. It is stored in the chat and becomes the next `message` update a `getUpdates` delivers, provided the bot's `allowed_updates` subscription includes messages at that moment ([bot-api.md](bot-api.md#getupdates)). The message is stored in the transcript either way.

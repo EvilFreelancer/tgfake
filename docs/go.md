@@ -1,6 +1,6 @@
 # Using tgfake from Go
 
-The tgfake server is also a set of Go packages, so a bot written in Go can be tested with the stand running in-process on `httptest`, with no binary to install and no port to pick. This page covers the four packages: [`pkg/server`](../pkg/server), the fake Bot API with the person's side as methods; [`pkg/botapi`](../pkg/botapi), the wire types; [`pkg/webapp`](../pkg/webapp), the Mini App launch helpers; and [`pkg/llmstub`](../pkg/llmstub), the scripted model. `go doc` on each package has the full signatures.
+The tgfake server is also a set of Go packages, so a bot written in Go can be tested with the stand running in-process on `httptest`, with no binary to install and no port to pick. This page covers [`pkg/server`](../pkg/server), the fake Bot API with the person's side as methods; [`pkg/botapi`](../pkg/botapi), the wire types; [`pkg/webapp`](../pkg/webapp), the Mini App launch helpers; [`pkg/llmstub`](../pkg/llmstub), the scripted model; and [`pkg/serverless`](../pkg/serverless), the optional Docker runtime for tgcloud projects. `go doc` on each package has the full signatures.
 
 ```bash
 go get github.com/EvilFreelancer/tgfake@latest
@@ -223,6 +223,10 @@ if kb := answer.Result.ReplyMarkup; kb == nil || kb.InlineKeyboard[0][0].Callbac
 	t.Fatalf("keyboard: %+v", kb)
 }
 ```
+
+## pkg/serverless
+
+The optional [`serverless`](../pkg/serverless) package runs local `tgcloud/` projects in Docker. `New(Options)` loads a module snapshot, `Migrate(ctx)` explicitly creates tables and indexes, `Run(ctx, module, input, invocationContext)` calls one module, `Poll(ctx)` delivers updates, `Handler()` serves authenticated `/api/` endpoints, and `Close()` cancels invocations and cleans up containers and temporary files. The API returns `Result`, `Log` and `InvocationError` values. See [serverless.md](serverless.md#go-tests) for configuration, lifecycle and examples.
 
 ## pkg/webapp
 

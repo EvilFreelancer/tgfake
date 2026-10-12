@@ -29,6 +29,10 @@ purpose. No token, no phone, no network.
 - **A scripted model.** `--llm` also serves an OpenAI-compatible
   `/v1/chat/completions` that answers by rule, in turn or by echo, streams
   word by word and can call a tool, so an LLM bot runs with no key.
+- **Local Telegram Serverless.** `--serverless <project>` runs `tgcloud/`
+  JavaScript handlers and authenticated Mini App endpoints in Docker, with
+  the platform SDK and a shared SQLite database. Node.js stays in the
+  container; [serverless.md](docs/serverless.md) covers the runtime and its limits.
 - **Two ways in.** A single static binary for Linux, macOS and Windows, or a
   Go package to run in-process on `httptest`.
 
@@ -142,6 +146,7 @@ GitHub Actions and the install script for everything else.
 | [docs/sim-api.md](docs/sim-api.md) | The simulation API: messages, taps, transcripts, the outbox, faults, Mini App launches, reset. |
 | [docs/mini-apps.md](docs/mini-apps.md) | `web_app` buttons, the menu button, signed launch data and the phone frame of the chat page. |
 | [docs/scripted-model.md](docs/scripted-model.md) | The OpenAI-compatible model of `--llm`: answers, rules, tool calls, streaming. |
+| [docs/serverless.md](docs/serverless.md) | Local tgcloud projects in Docker: handlers, SDK, SQLite, authenticated endpoints and Go tests. |
 | [docs/go.md](docs/go.md) | Using the packages from Go tests: `server`, `botapi`, `webapp`, `llmstub`. |
 | [docs/ci.md](docs/ci.md) | The GitHub Action, the install script and running the stand in other CI systems. |
 | [docs/development.md](docs/development.md) | Building, testing, the layout of the repository and cutting a release. |

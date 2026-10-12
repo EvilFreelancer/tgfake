@@ -26,6 +26,30 @@ inputs:
     description: Extra arguments for the started server, split on whitespace, for example "--llm --llm-script rules.json".
     required: false
     default: ""
+  serverless-project:
+    description: Local project containing tgcloud/ to run in Docker; empty disables serverless. Requires start and a Linux Docker engine.
+    required: false
+    default: ""
+  serverless-image:
+    description: Node.js Docker image for serverless; the action pulls it if missing.
+    required: false
+    default: node:24-bookworm-slim
+  serverless-db:
+    description: SQLite file for serverless; empty uses a temporary database.
+    required: false
+    default: ""
+  serverless-migrate:
+    description: Explicitly create the serverless schema tables and indexes at startup.
+    required: false
+    default: "false"
+  serverless-token:
+    description: Fake bot token used by serverless and to verify Mini App initData.
+    required: false
+    default: 123456:SERVERLESS
+  serverless-timeout:
+    description: Maximum serverless invocation duration, including container startup.
+    required: false
+    default: 10s
   download-base:
     description: Fetch <tag>/<asset> from here instead of the GitHub release downloads (a mirror, or a snapshot build under test).
     required: false
@@ -79,6 +103,36 @@ runs:
         echo "version=$version" >> "$GITHUB_OUTPUT"
         echo "tgfake $version installed at $path"
 
+    - name: Prepare serverless Docker runtime
+      if: inputs.serverless-project != ''
+      shell: bash
+      env:
+        INPUT_START: ${{ inputs.start }}
+        INPUT_PROJECT: ${{ inputs.serverless-project }}
+        INPUT_IMAGE: ${{ inputs.serverless-image }}
+        INPUT_MIGRATE: ${{ inputs.serverless-migrate }}
+      run: |
+        set -euo pipefail
+        if [ "$INPUT_START" != true ]; then
+          echo "serverless-project requires start: true" >&2
+          exit 1
+        fi
+        case "$INPUT_MIGRATE" in
+          true|false) ;;
+          *) echo "serverless-migrate must be true or false" >&2; exit 1 ;;
+        esac
+        if [ ! -d "$INPUT_PROJECT/tgcloud" ]; then
+          echo "serverless-project must contain tgcloud/" >&2
+          exit 1
+        fi
+        docker_bin=docker
+        if command -v docker.exe > /dev/null 2>&1; then docker_bin=docker.exe; fi
+        if [ "$("$docker_bin" info --format '{{.OSType}}' | tr -d '\r')" != linux ]; then
+          echo "serverless requires a running Linux Docker engine" >&2
+          exit 1
+        fi
+        "$docker_bin" image inspect "$INPUT_IMAGE" > /dev/null 2>&1 || "$docker_bin" pull "$INPUT_IMAGE"
+
     - id: start
       if: inputs.start == 'true'
       shell: bash
@@ -86,12 +140,28 @@ runs:
         TGFAKE_BIN: ${{ steps.install.outputs.path }}
         INPUT_ADDR: ${{ inputs.addr }}
         INPUT_ARGS: ${{ inputs.args }}
+        INPUT_PROJECT: ${{ inputs.serverless-project }}
+        INPUT_IMAGE: ${{ inputs.serverless-image }}
+        INPUT_DB: ${{ inputs.serverless-db }}
+        INPUT_MIGRATE: ${{ inputs.serverless-migrate }}
+        INPUT_TOKEN: ${{ inputs.serverless-token }}
+        INPUT_TIMEOUT: ${{ inputs.serverless-timeout }}
       run: |
         set -euo pipefail
         log="$RUNNER_TEMP/tgfake.log"
+        serverless_args=()
+        if [ -n "$INPUT_PROJECT" ]; then
+          serverless_args=(--serverless "$INPUT_PROJECT" --serverless-image "$INPUT_IMAGE" --token "$INPUT_TOKEN" --serverless-timeout "$INPUT_TIMEOUT")
+          if [ -n "$INPUT_DB" ]; then serverless_args+=(--serverless-db "$INPUT_DB"); fi
+          if [ "$INPUT_MIGRATE" = true ]; then serverless_args+=(--serverless-migrate); fi
+        fi
+        launcher=(nohup)
+        # MSYS nohup can discard the environment of native Windows programs.
+        # Non-interactive Bash does not send SIGHUP when its script exits.
+        if command -v cygpath > /dev/null 2>&1; then launcher=(); fi
         # Word splitting of INPUT_ARGS is the point: it carries several flags.
         # shellcheck disable=SC2086
-        nohup "$TGFAKE_BIN" --addr "$INPUT_ADDR" $INPUT_ARGS > "$log" 2>&1 &
+        TMPDIR="$RUNNER_TEMP" TMP="$RUNNER_TEMP" TEMP="$RUNNER_TEMP" "${launcher[@]}" "$TGFAKE_BIN" --addr "$INPUT_ADDR" "${serverless_args[@]}" $INPUT_ARGS > "$log" 2>&1 &
         pid=$!
         # The origin is the one the banner names, so port 0 and a wildcard
         # address work too; a wildcard is reached through the loopback.
@@ -114,4 +184,5 @@ runs:
         done
         echo "tgfake did not answer within 20 s:" >&2
         cat "$log" >&2
+        kill "$pid" 2>/dev/null || true
         exit 1
