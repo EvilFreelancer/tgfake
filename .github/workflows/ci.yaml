@@ -230,10 +230,29 @@ jobs:
           cat "$TGFAKE_LOG" >&2
           exit 1
 
+  docker:
+    name: Container webhook test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: tgfake:local
+          cache-from: type=gha,scope=docker-ci
+          cache-to: type=gha,mode=max,scope=docker-ci
+      - name: A bot receives a webhook across the Compose network
+        env:
+          TGFAKE_IMAGE: tgfake:local
+        run: sh scripts/test-docker.sh
+
   ci:
     name: CI
     if: always()
-    needs: [test, lint, snapshot, install]
+    needs: [test, lint, snapshot, install, docker]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed

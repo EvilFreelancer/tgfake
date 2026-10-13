@@ -1,0 +1,12 @@
+.git
+.github
+.agents
+.claude
+.cursor
+.env
+.env.*
+build
+dist
+coverage.out
+**/.env
+**/.env.*

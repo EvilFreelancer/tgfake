@@ -21,6 +21,7 @@ Flags are parsed by Go's `flag` package, so `-addr` and `--addr` are the same fl
 | `--bot-username` | `tgfake_bot` | The username `getMe` reports and the bot's messages carry. A group message that mentions the bot uses it. |
 | `--bot-name` | `tgfake` | The bot's first name, as `getMe` and the bot's own messages report it. |
 | `--inline` | off | Enable inline query simulation and report `supports_inline_queries=true` in `getMe`, like enabling inline mode through BotFather. |
+| `--allow-http-webhook` | off | Permit non-loopback HTTP webhook URLs on any port for container test networks. Does not relax HTTPS, malformed URL or secret-token validation. |
 | `--poll-max` | `30s` | The longest a `getUpdates` request is held open, whatever `timeout` the bot asks for. A call reaches the outbox when it is answered, so a short value such as `1s` lets a test see an idle bot's polls without waiting 30 seconds. |
 | `--verbose` | off | Print one line per Bot API call to stderr. |
 | `--version` | off | Print the version and exit. |

@@ -56,6 +56,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	pollMax := fs.Duration("poll-max", 30*time.Second, "longest a getUpdates request is held open")
 	verbose := fs.Bool("verbose", false, "print every Bot API call")
 	inlineMode := fs.Bool("inline", false, "enable the bot's inline mode, as in BotFather")
+	allowHTTPWebhook := fs.Bool("allow-http-webhook", false, "allow non-loopback HTTP webhooks on any port for container tests")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	project := fs.String("serverless", "", "local project containing tgcloud/; run JavaScript in Docker")
 	dockerImage := fs.String("serverless-image", serverless.DefaultDockerImage, "Docker image providing Node.js and node:sqlite; pull it first")
@@ -106,7 +107,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		*token = "123456:SERVERLESS"
 	}
 
-	opts := server.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax, InlineMode: *inlineMode}
+	opts := server.Options{Token: *token, BotUsername: *botUsername, BotFirstName: *botName, MaxPollWait: *pollMax, InlineMode: *inlineMode, AllowHTTPWebhook: *allowHTTPWebhook}
 	if *verbose {
 		opts.Logf = log.New(stderr, "", log.LstdFlags).Printf
 	}

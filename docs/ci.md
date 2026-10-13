@@ -260,17 +260,8 @@ The binary lands in `$(go env GOPATH)/bin` (or `GOBIN`) and reports the module v
 
 ## Containers
 
-No container image is published yet. The release binaries are static, so one runs in any Linux container. A Dockerfile that installs a pinned release with the install script and serves it on every interface of the container:
+The [Docker workflow](../.github/workflows/release.yaml) publishes Linux amd64 and arm64 images to `ghcr.io/<owner>/tgfake` after the release job succeeds. Image tags are the version without `v`, its major/minor and major version, and `latest` for stable releases. Prereleases get their full version tag only. The binary reports the release tag through `--version`. Container publication starts with the first release that includes this workflow; older releases have no images.
 
-```dockerfile
-FROM alpine:3.20
-ARG TGFAKE_VERSION=v1.1.0
-RUN apk add --no-cache curl \
- && curl -sSfL "https://raw.githubusercontent.com/EvilFreelancer/tgfake/${TGFAKE_VERSION}/scripts/install.sh" \
-    | sh -s -- -b /usr/local/bin "${TGFAKE_VERSION}" \
- && apk del curl
-EXPOSE 18790
-ENTRYPOINT ["tgfake", "--addr", "0.0.0.0:18790"]
-```
+Pull requests build the image without publishing it and run [`scripts/test-docker.sh`](../scripts/test-docker.sh). That test uses Docker Compose to start tgfake and an echo bot on separate containers, registers `http://bot:8080/webhook` with a secret, injects a message and checks the reply. The container test is included in the `CI` gate.
 
-Inside a container the stand has to listen on `0.0.0.0` (or `:18790`), because the default `127.0.0.1` is reachable from that container only. Other containers then reach it by the container's name, for example `http://tgfake:18790`, and extra flags such as `--llm` follow the image name in `docker run`. An image you build this way can also serve as a GitLab CI `services:` entry.
+See [docker.md](docker.md) for image builds, Compose configuration and the HTTP webhook option. The image does not contain the Docker CLI required by the optional serverless runtime.
