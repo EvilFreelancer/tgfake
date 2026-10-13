@@ -64,7 +64,14 @@ In GitHub Actions, the [action](docs/ci.md) installs it and can start it:
     args: --llm
 ```
 
+## Docker
+
+The release workflow publishes `ghcr.io/evilfreelancer/tgfake:<version>` for Linux amd64 and arm64, starting with the first release that includes Docker support. Forks publish under their own repository name. The container listens on `0.0.0.0:18790` and runs as a non-root user.
+
+To run tgfake next to a webhook bot, point the bot's API origin at `http://tgfake:18790` and start tgfake with `--addr 0.0.0.0:18790 --allow-http-webhook`. The opt-in flag accepts HTTP callbacks such as `http://bot:8080/webhook`; the default still applies Telegram's HTTPS rules. See the [Docker Compose example](docs/docker.md) for a working echo bot and local builds.
+
 ## Quick start
+
 
 Start the stand:
 

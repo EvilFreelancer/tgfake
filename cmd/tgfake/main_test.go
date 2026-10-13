@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,5 +154,24 @@ func TestRunRefusesAPositionalArgument(t *testing.T) {
 	err := run(context.Background(), []string{"--addr", "127.0.0.1:0", "extra", "--llm"}, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "extra") {
 		t.Fatalf("a positional argument was accepted: %v", err)
+	}
+}
+
+func TestAllowHTTPWebhookFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		accepted bool
+	}{
+		{"strict default", nil, false},
+		{"explicit opt-in", []string{"--allow-http-webhook"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := startCommand(t, tc.args...)
+			body := c.botCall("setWebhook", url.Values{"url": {"http://bot:8080/webhook"}})
+			if body["ok"] != tc.accepted {
+				t.Fatalf("setWebhook: %v", body)
+			}
+		})
 	}
 }

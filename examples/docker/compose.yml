@@ -1,0 +1,25 @@
+services:
+  tgfake:
+    image: ${TGFAKE_IMAGE:?Set TGFAKE_IMAGE to a published tag or local build}
+    command: ["--addr", "0.0.0.0:18790", "--allow-http-webhook", "--token", "123456:TEST"]
+    ports:
+      - "127.0.0.1:${TGFAKE_PORT:-18790}:18790"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:18790/sim/state"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+  bot:
+    image: node:24-alpine
+    user: "65532:65532"
+    command: ["node", "/app/bot.js"]
+    volumes:
+      - ./bot.js:/app/bot.js:ro
+    environment:
+      TELEGRAM_API: http://tgfake:18790
+      BOT_TOKEN: "123456:TEST"
+      WEBHOOK_URL: http://bot:8080/webhook
+      WEBHOOK_SECRET: test_secret
+    depends_on:
+      tgfake:
+        condition: service_healthy
