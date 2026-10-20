@@ -35,8 +35,8 @@ by review.
    installs the release with the action on Linux, macOS and Windows and talks to
    it, and pushes the container image for linux/amd64 and linux/arm64 to
    `ghcr.io/evilfreelancer/tgfake` (tags without the `v`; a pre-release gets
-   only its full version). After the first release with an image, its package
-   is made public once in the GHCR settings, since GitHub creates it private.
+   only its full version). The image's source label links the package to the
+   repository, which keeps it public: `docker pull` of the tag needs no login.
 
 ## Never
 
