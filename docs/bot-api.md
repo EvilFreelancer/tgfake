@@ -51,7 +51,7 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `getMe` | nothing | The bot's `User`: `id` 7000000001, `is_bot`, `first_name` (`--bot-name`), `username` (`--bot-username`), `can_join_groups` true, `can_read_all_group_messages` false, `supports_inline_queries` from `--inline` (false by default). |
 | `getUpdates` | `offset`, `limit`, `timeout`, `allowed_updates` | An array of `Update`; see [getUpdates](#getupdates). |
 | `setMyCommands` | `commands`, `scope`, `language_code` | `true`. One list per scope and per language; see [Commands](#commands). |
-| `getMyCommands` | `scope`, `language_code` | The list the scope shows the language, `[]` when the chain reaches none. |
+| `getMyCommands` | `scope`, `language_code` | The list registered for exactly that scope and language, `[]` when there is none. |
 | `deleteMyCommands` | `scope`, `language_code` | `true`. Forgets that one list; a wider one shows through again. |
 | `sendMessage` | `chat_id`, `text`, `parse_mode`, `reply_markup`, `reply_parameters` or `reply_to_message_id` and `allow_sending_without_reply` | The sent `Message`. |
 | `getFile` | `file_id` | A `File` with `file_path`, downloadable from `/file/bot<token>/<file_path>`. |
@@ -144,9 +144,9 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 ## Commands
 
-`setMyCommands` keeps one list per `scope` and per `language_code`, as Telegram keeps them. `getMyCommands` answers with the list a user of that scope and that language would see, and `deleteMyCommands` forgets exactly the list it names so a wider one shows through again.
+`setMyCommands` keeps one list per `scope` and per `language_code`, as Telegram keeps them, each command trimmed and without a leading `/`; no `commands` at all, or `null`, is an empty list. `getMyCommands` answers the list registered for exactly the scope and the language it names, `[]` when there is none ("If commands aren't set, an empty list is returned"), and `deleteMyCommands` forgets exactly that list so a wider one shows through again.
 
-The list is chosen by the chain the Bot API documents under "Determining list of commands", walked from the scope of the call downwards: the first list that is set wins. From `chat` in a private chat the chain is `chat` with the language, `chat`, `all_private_chats` with the language, `all_private_chats`, `default` with the language, `default`. From `chat_member` in a group it is `chat_member`, `chat_administrators` (administrators only), `chat`, `all_chat_administrators` (administrators only), `all_group_chats`, `default`, each tried with the language before without one. A list registered for another language answers nothing and leaves the next step of the chain to answer.
+What a user sees in the menu is another list: the one the chain the Bot API documents under "Determining list of commands" reaches first, walked from the user's scope downwards. The stand resolves it in [`Server.CommandsFor`](go.md#reading-what-the-bot-did). From `chat` in a private chat the chain is `chat` with the language, `chat`, `all_private_chats` with the language, `all_private_chats`, `default` with the language, `default`. From `chat_member` in a group it is `chat_member`, `chat_administrators` (administrators only), `chat`, `all_chat_administrators` (administrators only), `all_group_chats`, `default`, each tried with the language before without one. A list registered for another language answers nothing and leaves the next step of the chain to answer.
 
 A scope names its chat by integer id, given as a number or a string of digits, or by the `@username` of a configured group or channel, the way the chat information methods resolve one; a username the stand cannot resolve is answered the way Telegram answers it, `Bad Request: chat not found`. A chat with a positive id the stand has not seen is a private chat, a negative one a group, so the administrator and member scopes are refused for the first. `is_ephemeral` of a command is kept and answered back, but a message is never ephemeral.
 
@@ -175,6 +175,7 @@ The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_che
 | inline results | At most 50; result ids contain 1 to 64 bytes. |
 | prepared message | 5 minutes in the stand. |
 | `copy_text.text` | 1 to 256 characters. |
+| a bot command | 1 to 32 characters after trimming and dropping a leading `/`; its description 1 to 256 characters after trimming. |
 | `title` of `sendInvoice` | 1 to 32 characters. |
 | `description` of `sendInvoice` | 1 to 255 characters. |
 | `payload` of `sendInvoice` | 1 to 128 bytes. |
@@ -194,7 +195,10 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | any method the stand does not serve | always (404) | `Not Found: method not found` |
 | a path that is not `/bot<token>/<method>` | always (404) | `Not Found` |
 | `getUpdates` | `allowed_updates` is not a JSON array | `Bad Request: can't parse allowed_updates JSON array` |
-| `setMyCommands` | `commands` is missing or not a JSON list of commands | `Bad Request: can't parse commands JSON object` |
+| `setMyCommands` | `commands` is not JSON / not an array | `Bad Request: Can't parse commands JSON object` / `Bad Request: Expected an Array of BotCommand` |
+| same | a command is not an object, or has no `command` or `description` | `Bad Request: Can't parse BotCommand: expected an Object` / `...: Can't find field "command"` / `...: Can't find field "description"` |
+| same | after trimming and dropping a leading `/`, a command is empty or past 32 characters | `Bad Request: Command must be non-empty` / `Bad Request: Command length must not exceed 32` |
+| same | after trimming, a description is empty or past 256 characters | `Bad Request: Command description must be non-empty` / `Bad Request: Command description length must not exceed 256` |
 | `setMyCommands`, `getMyCommands`, `deleteMyCommands` | `scope` is not JSON / not a JSON object | `Bad Request: Can't parse BotCommandScope JSON object` / `Bad Request: Can't parse BotCommandScope: BotCommandScope must be an Object` |
 | same | `scope.type` is missing / not a string / not one of the seven the Bot API defines | `Bad Request: Can't parse BotCommandScope: Can't find field "type"` / `...: Field "type" must be of type String` / `...: Unsupported type specified` |
 | same | a chat scope has no `chat_id` / an empty one | `Bad Request: Can't parse BotCommandScope: Can't find field "chat_id"` / `...: Empty chat_id specified` |

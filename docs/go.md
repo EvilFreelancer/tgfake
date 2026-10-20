@@ -68,7 +68,7 @@ t.Cleanup(func() {
 | `Calls(method string) []Call` | The outbox, oldest first, of one method (compared without regard to case) or of every method for `""`. |
 | `WaitCall(method string, n int, timeout time.Duration) bool` | Waits until the outbox holds at least n calls of the method, checking every 10 ms; false when the timeout passed first. |
 | `Commands() []botapi.BotCommand` | The default-scope list with no language, `[]` before any `setMyCommands`. |
-| `CommandsFor(scope botapi.BotCommandScope, languageCode string) []botapi.BotCommand` | The commands a user of the scope would see, speaking that language ([bot-api.md](bot-api.md#commands)). |
+| `CommandsFor(scope botapi.BotCommandScope, languageCode string) []botapi.BotCommand` | The menu a user of the scope sees, speaking that language: the first list the chain of "Determining list of commands" reaches ([bot-api.md](bot-api.md#commands)). A scope with no `Type` is the default one. |
 | `CommandLists() []CommandList` | Every list the bot registered, as `Scope`, `LanguageCode` and `Commands`, in a stable order. |
 | `MenuButton(chat int64) botapi.MenuButton` | The menu button a chat shows; chat 0 is the bot's own. |
 | `File(id string) ([]byte, bool)` | A copy of the bytes the bot uploaded under a `file_id`. |

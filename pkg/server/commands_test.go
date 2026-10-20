@@ -1,8 +1,10 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/EvilFreelancer/tgfake/pkg/botapi"
@@ -15,10 +17,24 @@ func TestSetMyCommands_Refusals(t *testing.T) {
 		form url.Values
 		want string
 	}{
-		{"commands that are not a list", url.Values{"commands": {`nope`}},
-			"Bad Request: can't parse commands JSON object"},
-		{"no commands", url.Values{},
-			"Bad Request: can't parse commands JSON object"},
+		{"commands that are not JSON", url.Values{"commands": {`nope`}},
+			"Bad Request: Can't parse commands JSON object"},
+		{"commands that are not a list", url.Values{"commands": {`{"command":"start"}`}},
+			"Bad Request: Expected an Array of BotCommand"},
+		{"a command that is not an object", url.Values{"commands": {`["start"]`}},
+			"Bad Request: Can't parse BotCommand: expected an Object"},
+		{"a command with no command", url.Values{"commands": {`[{"description":"Start"}]`}},
+			`Bad Request: Can't parse BotCommand: Can't find field "command"`},
+		{"a command with no description", url.Values{"commands": {`[{"command":"start"}]`}},
+			`Bad Request: Can't parse BotCommand: Can't find field "description"`},
+		{"a command that is only a slash", url.Values{"commands": {`[{"command":" / ","description":"Start"}]`}},
+			"Bad Request: Command must be non-empty"},
+		{"a command over 32 characters", url.Values{"commands": {`[{"command":"` + strings.Repeat("a", 33) + `","description":"Start"}]`}},
+			"Bad Request: Command length must not exceed 32"},
+		{"a blank description", url.Values{"commands": {`[{"command":"start","description":"  "}]`}},
+			"Bad Request: Command description must be non-empty"},
+		{"a description over 256 characters", url.Values{"commands": {`[{"command":"start","description":"` + strings.Repeat("d", 257) + `"}]`}},
+			"Bad Request: Command description length must not exceed 256"},
 		{"a scope that is not JSON", url.Values{"commands": {`[]`}, "scope": {`{type:chat}`}},
 			"Bad Request: Can't parse BotCommandScope JSON object"},
 		{"a scope that is not an object", url.Values{"commands": {`[]`}, "scope": {`["chat"]`}},
@@ -128,21 +144,7 @@ func TestCommandsFor_WalksTheDocumentedChain(t *testing.T) {
 	}
 	shown := func(scope, language string) string {
 		t.Helper()
-		form := url.Values{}
-		if scope != "" {
-			form.Set("scope", scope)
-		}
-		if language != "" {
-			form.Set("language_code", language)
-		}
-		_, body := s.call("getMyCommands", form)
-		list, _ := body["result"].([]any)
-		if len(list) == 0 {
-			return ""
-		}
-		first, _ := list[0].(map[string]any)
-		command, _ := first["command"].(string)
-		return command
+		return firstCommand(t, s, scope, language)
 	}
 
 	// Nothing is registered: the chain runs out and answers an empty list.
@@ -213,14 +215,7 @@ func TestCommandsFor_AdministratorScopesServeAdministrators(t *testing.T) {
 	}
 	shown := func(scope string) string {
 		t.Helper()
-		_, body := s.call("getMyCommands", url.Values{"scope": {scope}})
-		list, _ := body["result"].([]any)
-		if len(list) == 0 {
-			return ""
-		}
-		first, _ := list[0].(map[string]any)
-		command, _ := first["command"].(string)
-		return command
+		return firstCommand(t, s, scope, "")
 	}
 
 	register("", "default")
@@ -249,6 +244,14 @@ func TestCommandsFor_AdministratorScopesServeAdministrators(t *testing.T) {
 	}
 	if got := shown(`{"type":"chat_administrators","chat_id":-100}`); got != "all-admins" {
 		t.Fatalf("administrators scope after deleting the chat's list: %q", got)
+	}
+	// The administrators of every group read the lists of every group next.
+	register(`{"type":"all_group_chats"}`, "group")
+	if status, body := s.call("deleteMyCommands", url.Values{"scope": {`{"type":"all_chat_administrators"}`}}); status != http.StatusOK {
+		t.Fatalf("deleteMyCommands: %d %v", status, body)
+	}
+	if got := shown(`{"type":"all_chat_administrators"}`); got != "group" {
+		t.Fatalf("all administrators after deleting their list: %q", got)
 	}
 	// A private chat has no administrator scopes in its chain at all.
 	if got := s.fake.CommandsFor(botapi.BotCommandScope{Type: "chat", ChatID: 4242}, ""); len(got) != 1 || got[0].Command != "default" {
@@ -280,5 +283,83 @@ func TestCommands_IsTheDefaultScope(t *testing.T) {
 	}
 	if lists := s.fake.CommandLists(); len(lists) != 2 {
 		t.Fatalf("CommandLists() = %v, want both registrations", lists)
+	}
+}
+
+// firstCommand is the first command of the menu a user of the scope sees,
+// speaking the language, or "" for an empty menu.
+func firstCommand(t *testing.T, s *stand, scope, language string) string {
+	t.Helper()
+	var query botapi.BotCommandScope
+	if scope != "" {
+		if err := json.Unmarshal([]byte(scope), &query); err != nil {
+			t.Fatalf("scope %s: %v", scope, err)
+		}
+	}
+	list := s.fake.CommandsFor(query, language)
+	if len(list) == 0 {
+		return ""
+	}
+	return list[0].Command
+}
+
+// getMyCommands reads back what setMyCommands wrote for exactly that scope
+// and language: no wider list and no list of the language-less registration
+// answers for it.
+func TestGetMyCommands_AnswersTheListOfItsScopeAndLanguage(t *testing.T) {
+	s := newStand(t, Options{})
+	for _, reg := range []url.Values{
+		{"commands": {`[{"command":"start","description":"Start"}]`}},
+		{"commands": {`[{"command":"go","description":"Go"}]`}, "scope": {`{"type":"chat","chat_id":4242}`}, "language_code": {"en"}},
+	} {
+		if status, body := s.call("setMyCommands", reg); status != http.StatusOK {
+			t.Fatalf("setMyCommands: %d %v", status, body)
+		}
+	}
+	cases := []struct {
+		form url.Values
+		want string
+	}{
+		{url.Values{}, "start"},
+		{url.Values{"language_code": {"en"}}, ""},
+		{url.Values{"scope": {`{"type":"chat","chat_id":4242}`}}, ""},
+		{url.Values{"scope": {`{"type":"chat","chat_id":4242}`}, "language_code": {"en"}}, "go"},
+		{url.Values{"scope": {`{"type":"all_private_chats"}`}, "language_code": {"en"}}, ""},
+	}
+	for _, c := range cases {
+		status, body := s.call("getMyCommands", c.form)
+		if status != http.StatusOK {
+			t.Fatalf("getMyCommands %v: %d %v", c.form, status, body)
+		}
+		got := ""
+		if list, _ := body["result"].([]any); len(list) > 0 {
+			got, _ = list[0].(map[string]any)["command"].(string)
+		}
+		if got != c.want {
+			t.Fatalf("getMyCommands %v: %q, want %q", c.form, got, c.want)
+		}
+	}
+}
+
+// Commands are kept the way Telegram keeps them: trimmed, without a leading
+// slash; an absent list is an empty one, and user_id belongs to the
+// chat_member scope only.
+func TestSetMyCommands_KeepsCommandsAsTelegramDoes(t *testing.T) {
+	s := newStand(t, Options{})
+	if status, body := s.call("setMyCommands", url.Values{
+		"commands": {`[{"command":" /start ","description":" Start "}]`},
+		"scope":    {`{"type":"default","user_id":1}`},
+	}); status != http.StatusOK {
+		t.Fatalf("setMyCommands: %d %v", status, body)
+	}
+	list := s.fake.Commands()
+	if len(list) != 1 || list[0].Command != "start" || list[0].Description != "Start" {
+		t.Fatalf("Commands() = %v, want the trimmed default list", list)
+	}
+	if status, body := s.call("setMyCommands", url.Values{}); status != http.StatusOK {
+		t.Fatalf("setMyCommands with no commands: %d %v", status, body)
+	}
+	if lists := s.fake.CommandLists(); len(lists) != 1 || len(lists[0].Commands) != 0 {
+		t.Fatalf("CommandLists() = %v, want one empty default list", lists)
 	}
 }

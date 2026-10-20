@@ -7,15 +7,18 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/EvilFreelancer/tgfake/pkg/botapi"
 )
 
 // A bot keeps one list of commands per scope and per user language, as
-// setMyCommands registers them: the list of a narrow scope is what a user of
-// that scope sees, and a list registered with no language_code answers every
-// user "for whose language there are no dedicated commands". deleteMyCommands
-// takes one list away and lets a wider one show through again.
+// setMyCommands registers them. getMyCommands answers the list registered for
+// exactly the scope and the language it names, and deleteMyCommands takes that
+// one list away. What a user sees is another matter: the first list the chain
+// of "Determining list of commands" reaches, a narrower scope before a wider
+// one and the user's language before the list registered with none, which
+// CommandsFor resolves.
 
 // commandScope is a BotCommandScope normalised for storage and lookup.
 type commandScope struct {
@@ -92,7 +95,7 @@ func (c commandScope) covers(q commandScope, chatType string, admin bool) bool {
 		return q.kind == "all_private_chats" ||
 			((q.kind == "chat" || q.kind == "chat_administrators" || q.kind == "chat_member") && !isGroupChat(chatType))
 	case "all_group_chats":
-		return q.kind == "all_group_chats" ||
+		return q.kind == "all_group_chats" || q.kind == "all_chat_administrators" ||
 			((q.kind == "chat" || q.kind == "chat_administrators" || q.kind == "chat_member") && isGroupChat(chatType))
 	}
 	return false
@@ -252,13 +255,83 @@ func (s *Server) commandKeyOf(params url.Values) (commandKey, string) {
 	return commandKey{scope: scope, lang: params.Get("language_code")}, problem
 }
 
+// parseCommands reads the commands of setMyCommands the way the Bot API
+// server reads them: nothing, or JSON null, is an empty list, and every item
+// is an object with a command and a description. It returns the commands and
+// the description of the refusal, if any.
+func parseCommands(raw string) ([]botapi.BotCommand, string) {
+	cmds := []botapi.BotCommand{}
+	if raw == "" {
+		return cmds, ""
+	}
+	if !json.Valid([]byte(raw)) {
+		return nil, "Bad Request: Can't parse commands JSON object"
+	}
+	var items []json.RawMessage
+	if json.Unmarshal([]byte(raw), &items) != nil {
+		return nil, "Bad Request: Expected an Array of BotCommand"
+	}
+	for _, item := range items {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(item, &fields) != nil || fields == nil {
+			return nil, "Bad Request: Can't parse BotCommand: expected an Object"
+		}
+		command, problem := jsonStringField(fields, "command")
+		if problem != "" {
+			return nil, "Bad Request: Can't parse BotCommand: " + problem
+		}
+		description, problem := jsonStringField(fields, "description")
+		if problem != "" {
+			return nil, "Bad Request: Can't parse BotCommand: " + problem
+		}
+		cmd := botapi.BotCommand{Command: command, Description: description}
+		if raw, ok := fields["is_ephemeral"]; ok && json.Unmarshal(raw, &cmd.IsEphemeral) != nil {
+			return nil, `Bad Request: Can't parse BotCommand: Field "is_ephemeral" must be of type Boolean`
+		}
+		cmds = append(cmds, cmd)
+	}
+	return cmds, ""
+}
+
+// Command limits Telegram states for setMyCommands, in characters.
+const (
+	commandMax            = 32
+	commandDescriptionMax = 256
+)
+
+// tidyCommands trims every command and description, drops a leading slash
+// from a command and refuses an empty or overlong one, the way Telegram does
+// before it stores the list. It returns the commands as Telegram keeps them.
+func tidyCommands(cmds []botapi.BotCommand) ([]botapi.BotCommand, string) {
+	out := make([]botapi.BotCommand, 0, len(cmds))
+	for _, cmd := range cmds {
+		cmd.Command = strings.TrimPrefix(strings.TrimSpace(cmd.Command), "/")
+		cmd.Description = strings.TrimSpace(cmd.Description)
+		switch {
+		case cmd.Command == "":
+			return nil, "Bad Request: Command must be non-empty"
+		case utf8.RuneCountInString(cmd.Command) > commandMax:
+			return nil, "Bad Request: Command length must not exceed " + strconv.Itoa(commandMax)
+		case cmd.Description == "":
+			return nil, "Bad Request: Command description must be non-empty"
+		case utf8.RuneCountInString(cmd.Description) > commandDescriptionMax:
+			return nil, "Bad Request: Command description length must not exceed " + strconv.Itoa(commandDescriptionMax)
+		}
+		out = append(out, cmd)
+	}
+	return out, ""
+}
+
 func (s *Server) setMyCommands(w http.ResponseWriter, method string, params url.Values) {
-	var cmds []botapi.BotCommand
-	if err := json.Unmarshal([]byte(params.Get("commands")), &cmds); err != nil {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't parse commands JSON object", 0)
+	cmds, problem := parseCommands(params.Get("commands"))
+	if problem != "" {
+		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
 	}
 	key, problem := s.commandKeyOf(params)
+	if problem == "" {
+		cmds, problem = tidyCommands(cmds)
+	}
 	if problem != "" {
 		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
@@ -278,8 +351,11 @@ func (s *Server) getMyCommands(w http.ResponseWriter, method string, params url.
 		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
 	}
+	// The list registered for exactly this scope and language: getMyCommands
+	// reads what setMyCommands wrote, it does not walk the chain a user's
+	// client walks ("If commands aren't set, an empty list is returned").
 	s.mu.Lock()
-	list := s.commandsForLocked(key.scope, key.lang)
+	list := append([]botapi.BotCommand{}, s.commandLists[key]...)
 	s.mu.Unlock()
 	s.writeResult(w, method, params, list)
 }
@@ -298,15 +374,16 @@ func (s *Server) deleteMyCommands(w http.ResponseWriter, method string, params u
 
 // Commands returns the list the bot registered for the default scope and no
 // language: what a bot with no scoped lists shows everyone, and what
-// getMyCommands answers with no scope.
+// getMyCommands answers with no scope and no language.
 func (s *Server) Commands() []botapi.BotCommand {
 	return s.CommandsFor(defaultCommandScope.wire(), "")
 }
 
-// CommandsFor returns the commands a user of the scope would see, speaking
-// languageCode, walking the chain the Bot API documents: the first list that
-// is set wins, a narrower scope before a wider one and the language's own list
-// before the one with no language.
+// CommandsFor returns the commands a user of the scope would see in the
+// menu, speaking languageCode, walking the chain the Bot API documents under
+// "Determining list of commands": the first list that is set wins, a narrower
+// scope before a wider one and the language's own list before the one with no
+// language. A scope with no Type is the default one.
 func (s *Server) CommandsFor(scope botapi.BotCommandScope, languageCode string) []botapi.BotCommand {
 	query := commandScope{kind: scope.Type, chatID: scope.ChatID, userID: scope.UserID}
 	if query.kind == "" {

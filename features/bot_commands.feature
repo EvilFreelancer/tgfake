@@ -2,7 +2,8 @@ Feature: The offline Telegram stand keeps commands per scope and language
   A bot registers one list of commands per scope and per user language. A user
   is shown the first list the Bot API's chain reaches for them: a narrower
   scope before a wider one, and the language's own list before the one
-  registered with no language.
+  registered with no language. getMyCommands answers the list registered for
+  exactly the scope and the language it names.
 
   Scenario: A chat's own commands win over the bot's default ones
     Given an offline Telegram stand
@@ -32,3 +33,9 @@ Feature: The offline Telegram stand keeps commands per scope and language
     And the bot registers a command list for that group's administrators
     Then an administrator of that group shows that list
     And a plain member of that group shows the default list
+
+  Scenario: getMyCommands answers the list registered for its scope and language
+    Given an offline Telegram stand
+    When the bot registers a default command list
+    Then getMyCommands for one private chat in English answers no commands
+    And getMyCommands with no scope and no language answers the default list

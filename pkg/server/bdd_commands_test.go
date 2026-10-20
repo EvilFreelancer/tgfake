@@ -80,6 +80,12 @@ func TestBotCommandsFeature(t *testing.T) {
 			sc.Then(`^a plain member of that group shows the default list$`, func() error {
 				return expectCommands(stand, `{"type":"chat_member","chat_id":-100,"user_id":4243}`, "en", defaultList)
 			})
+			sc.Then(`^getMyCommands for one private chat in English answers no commands$`, func() error {
+				return expectRegistered(stand, chatScope, "en", `[]`)
+			})
+			sc.Then(`^getMyCommands with no scope and no language answers the default list$`, func() error {
+				return expectRegistered(stand, "", "", defaultList)
+			})
 		},
 		Options: &godog.Options{Format: "pretty", Paths: []string{"../../features/bot_commands.feature"}, TestingT: t, Strict: true},
 	}
@@ -103,10 +109,24 @@ func setCommands(stand *stand, scope, language, commands string) error {
 	return nil
 }
 
-// expectCommands asserts the answer of getMyCommands against the list it is
-// meant to show, as the JSON the bot registered it with.
+// expectCommands asserts the menu a user of the scope sees, speaking the
+// language, against the list it is meant to show, as the JSON the bot
+// registered it with.
 func expectCommands(stand *stand, scope, language, want string) error {
-	form := url.Values{"scope": {scope}}
+	var query botapi.BotCommandScope
+	if err := json.Unmarshal([]byte(scope), &query); err != nil {
+		return fmt.Errorf("scope %s: %w", scope, err)
+	}
+	return sameCommands(stand.fake.CommandsFor(query, language), scope, language, want)
+}
+
+// expectRegistered asserts the answer of getMyCommands: the list registered
+// for exactly that scope and language.
+func expectRegistered(stand *stand, scope, language, want string) error {
+	form := url.Values{}
+	if scope != "" {
+		form.Set("scope", scope)
+	}
 	if language != "" {
 		form.Set("language_code", language)
 	}
@@ -122,6 +142,11 @@ func expectCommands(stand *stand, scope, language, want string) error {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		return fmt.Errorf("result %s: %w", raw, err)
 	}
+	return sameCommands(got, scope, language, want)
+}
+
+func sameCommands(got []botapi.BotCommand, scope, language, want string) error {
+	raw, _ := json.Marshal(got)
 	wantList := make([]botapi.BotCommand, 0, 4)
 	if err := json.Unmarshal([]byte(want), &wantList); err != nil {
 		return fmt.Errorf("want %s: %w", want, err)
