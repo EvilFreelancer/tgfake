@@ -175,7 +175,7 @@ The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_che
 | inline results | At most 50; result ids contain 1 to 64 bytes. |
 | prepared message | 5 minutes in the stand. |
 | `copy_text.text` | 1 to 256 characters. |
-| a bot command | 1 to 32 characters after trimming and dropping a leading `/`; its description 1 to 256 characters after trimming. |
+| a bot command | 1 to 32 lower-case Latin letters, digits and `_` after trimming and dropping a leading `/`; its description 1 to 256 characters after trimming. |
 | `title` of `sendInvoice` | 1 to 32 characters. |
 | `description` of `sendInvoice` | 1 to 255 characters. |
 | `payload` of `sendInvoice` | 1 to 128 bytes. |
@@ -195,22 +195,23 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | any method the stand does not serve | always (404) | `Not Found: method not found` |
 | a path that is not `/bot<token>/<method>` | always (404) | `Not Found` |
 | `getUpdates` | `allowed_updates` is not a JSON array | `Bad Request: can't parse allowed_updates JSON array` |
-| `setMyCommands` | `commands` is not JSON / not an array | `Bad Request: Can't parse commands JSON object` / `Bad Request: Expected an Array of BotCommand` |
-| same | a command is not an object, or has no `command` or `description` | `Bad Request: Can't parse BotCommand: expected an Object` / `...: Can't find field "command"` / `...: Can't find field "description"` |
-| same | after trimming and dropping a leading `/`, a command is empty or past 32 characters | `Bad Request: Command must be non-empty` / `Bad Request: Command length must not exceed 32` |
-| same | after trimming, a description is empty or past 256 characters | `Bad Request: Command description must be non-empty` / `Bad Request: Command description length must not exceed 256` |
-| `setMyCommands`, `getMyCommands`, `deleteMyCommands` | `scope` is not JSON / not a JSON object | `Bad Request: Can't parse BotCommandScope JSON object` / `Bad Request: Can't parse BotCommandScope: BotCommandScope must be an Object` |
-| same | `scope.type` is missing / not a string / not one of the seven the Bot API defines | `Bad Request: Can't parse BotCommandScope: Can't find field "type"` / `...: Field "type" must be of type String` / `...: Unsupported type specified` |
-| same | a chat scope has no `chat_id` / an empty one | `Bad Request: Can't parse BotCommandScope: Can't find field "chat_id"` / `...: Empty chat_id specified` |
-| same | a `chat_member` scope has no `user_id` / one that is not an integer / one that is not positive | `Bad Request: Can't parse BotCommandScope: Can't find field "user_id"` / `...: Field "user_id" must be a valid Number` / `...: Invalid user_id specified` |
+| `setMyCommands` | `commands` is not JSON / not an array | `Bad Request: can't parse commands JSON object` / `Bad Request: expected an Array of BotCommand` |
+| same | a command is not an object, or has no `command` or `description` | `Bad Request: can't parse BotCommand: expected an Object` / `...: Can't find field "command"` / `...: Can't find field "description"` |
+| same | after trimming and dropping a leading `/`, a command is empty or past 32 characters | `Bad Request: command must be non-empty` / `Bad Request: command length must not exceed 32` |
+| same | a command holds anything but lower-case Latin letters, digits and `_` | `Bad Request: BOT_COMMAND_INVALID` |
+| same | after trimming, a description is empty or past 256 characters | `Bad Request: command description must be non-empty` / `Bad Request: command description length must not exceed 256` |
+| `setMyCommands`, `getMyCommands`, `deleteMyCommands` | `scope` is not JSON / not a JSON object | `Bad Request: can't parse BotCommandScope JSON object` / `Bad Request: can't parse BotCommandScope: BotCommandScope must be an Object` |
+| same | `scope.type` is missing / not a string / not one of the seven the Bot API defines | `Bad Request: can't parse BotCommandScope: Can't find field "type"` / `...: Field "type" must be of type String` / `...: Unsupported type specified` |
+| same | a chat scope has no `chat_id` / an empty one | `Bad Request: can't parse BotCommandScope: Can't find field "chat_id"` / `...: Empty chat_id specified` |
+| same | a `chat_member` scope has no `user_id` / one that is not an integer / one that is not positive | `Bad Request: can't parse BotCommandScope: Can't find field "user_id"` / `...: Field "user_id" must be a valid Number` / `...: Invalid user_id specified` |
 | same | a chat scope names a username that is not a configured group or channel, or chat 0 | `Bad Request: chat not found` |
-| same | a `chat_administrators` or `chat_member` scope names a private chat / a scope names a channel | `Bad Request: Can't use specified scope in private chats` / `Bad Request: Can't change commands in channel chats` |
-| same | `language_code` is neither empty nor two lower-case Latin letters | `Bad Request: Invalid language code specified` |
+| same | a `chat_administrators` or `chat_member` scope names a private chat / a scope names a channel | `Bad Request: can't use specified scope in private chats` / `Bad Request: can't change commands in channel chats` |
+| same | `language_code` is neither empty nor two lower-case Latin letters | `Bad Request: invalid language code specified` |
 | `sendMessage`, `sendPhoto`, `sendDocument`, `editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `sendChatAction`, `sendRichMessage`, `sendRichMessageDraft` | `chat_id` is missing, zero or not an integer | `Bad Request: chat_id is empty` |
 | `sendMessage`, `editMessageText` | `text` is empty | `Bad Request: message text is empty` |
 | `sendMessage`, `editMessageText` | `text` is over 4096 characters | `Bad Request: message is too long` |
-| `sendMessage`, `sendPhoto`, `sendDocument`, `sendRichMessage`, `editMessageText`, `editMessageReplyMarkup` | `inline_keyboard` is not an array, `null` included: what a library sends for a keyboard built from no rows | `Bad Request: Field "inline_keyboard" must be of type Array` |
-| same | a button has no action, only `text` | `Bad Request: Text buttons are not allowed in the inline keyboard` |
+| `sendMessage`, `sendPhoto`, `sendDocument`, `sendRichMessage`, `editMessageText`, `editMessageReplyMarkup` | `inline_keyboard` is not an array, `null` included: what a library sends for a keyboard built from no rows | `Bad Request: field "inline_keyboard" must be of type Array` |
+| same | a button has no action, only `text` | `Bad Request: can't parse InlineKeyboardButton: Text buttons are not allowed in the inline keyboard` |
 | same | a button has more than one of `callback_data`, `url` and `web_app` (stricter than Telegram, see above) | `Bad Request: BUTTON_TYPE_INVALID` |
 | same | `callback_data` is over 64 bytes | `Bad Request: BUTTON_DATA_INVALID` |
 | same | a `web_app` button in a chat that is not private | `Bad Request: BUTTON_TYPE_INVALID` |
@@ -226,21 +227,20 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | same | the message is the person's, not the bot's | `Bad Request: message can't be edited` |
 | same | neither the text nor the keyboard would change | `Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message` |
 | `deleteMessage` | the message is not in the chat or was already deleted | `Bad Request: message to delete not found` |
-| `answerCallbackQuery` | `callback_query_id` is empty | `Bad Request: callback_query_id is empty` |
-| same | the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
+| `answerCallbackQuery` | `callback_query_id` is empty, the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
 | `sendInvoice` | `chat_id` is missing, zero or not an integer | `Bad Request: chat_id is empty` |
-| same | `title`, `description`, `payload`, `currency` or `prices` is empty, checked in that order | `Bad Request: Parameter "<name>" is required` |
-| same | `payload` is not UTF-8 | `Bad Request: The payload must be encoded in UTF-8` |
-| same | `prices` is not JSON / not an array | `Bad Request: Can't parse prices JSON object` / `Bad Request: Expected an Array of LabeledPrice` |
-| same | a price is not an object, has no or an empty `label`, or no `amount` | `Bad Request: Can't parse LabeledPrice: LabeledPrice must be an Object` / `...: Can't find field "label"` / `...: LabeledPrice label must be non-empty` / `...: Can't find field "amount"` |
-| same | an `amount` is not an integer (a number or a string of digits) | `Bad Request: Can't parse LabeledPrice: Field "amount" must be a valid Number` |
-| same | `prices` is an empty array | `Bad Request: There must be at least one price part` |
-| same | an `amount` is past 999999999999 either way | `Bad Request: Too big amount of the currency specified` |
-| same | the total of the prices is zero or negative / past 999999999999 | `Bad Request: Total price must be positive` / `Bad Request: Total price is too big` |
+| same | `title`, `description`, `payload`, `currency` or `prices` is empty, checked in that order | `Bad Request: parameter "<name>" is required` |
+| same | `payload` is not UTF-8 | `Bad Request: the payload must be encoded in UTF-8` |
+| same | `prices` is not JSON / not an array | `Bad Request: can't parse prices JSON object` / `Bad Request: expected an Array of LabeledPrice` |
+| same | a price is not an object, has no or an empty `label`, or no `amount` | `Bad Request: can't parse LabeledPrice: LabeledPrice must be an Object` / `...: Can't find field "label"` / `...: LabeledPrice label must be non-empty` / `...: Can't find field "amount"` |
+| same | an `amount` is not an integer (a number or a string of digits) | `Bad Request: can't parse LabeledPrice: Field "amount" must be a valid Number` |
+| same | `prices` is an empty array | `Bad Request: there must be at least one price part` |
+| same | an `amount` is past 999999999999 either way | `Bad Request: too big amount of the currency specified` |
+| same | the total of the prices is zero or negative / past 999999999999 | `Bad Request: total price must be positive` / `Bad Request: total price is too big` |
 | same | `title`, `description` or `payload` is past the length above | `Bad Request: title is too long` / `description is too long` / `payload is too long` |
 | same | `currency` is `XTR` and `prices` does not hold exactly one item | `Bad Request: prices must contain exactly one item` |
 | same | a keyboard does not lead with a Pay button | `Bad Request: BUTTON_TYPE_INVALID` |
-| `answerPreCheckoutQuery` | `ok` is not true and `error_message` is empty | `Bad Request: Parameter "error_message" is required` |
+| `answerPreCheckoutQuery` | `ok` is not true and `error_message` is empty | `Bad Request: parameter "error_message" is required` |
 | same | `pre_checkout_query_id` is empty, the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
 | `sendRichMessage` | `rich_message` is not a JSON object with a non-empty `markdown` or `html` | `Bad Request: can't parse rich_message JSON object` |
 | `sendRichMessageDraft` | `draft_id` is missing, zero or not an integer | `Bad Request: draft_id must be a non-zero integer` |

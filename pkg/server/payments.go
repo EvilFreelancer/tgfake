@@ -123,10 +123,10 @@ var invoiceRequired = []string{"title", "description", "payload", "currency", "p
 func invoiceFieldProblem(params url.Values) string {
 	for _, name := range invoiceRequired {
 		if params.Get(name) == "" {
-			return `Bad Request: Parameter "` + name + `" is required`
+			return `Bad Request: parameter "` + name + `" is required`
 		}
 		if name == "payload" && !utf8.ValidString(params.Get(name)) {
-			return "Bad Request: The payload must be encoded in UTF-8"
+			return "Bad Request: the payload must be encoded in UTF-8"
 		}
 	}
 	return ""
@@ -157,46 +157,46 @@ func invoiceLimitProblem(params url.Values, prices []botapi.LabeledPrice) string
 // positive. It returns the prices and the description of the refusal, if any.
 func parsePrices(raw string) ([]botapi.LabeledPrice, string) {
 	if !json.Valid([]byte(raw)) {
-		return nil, "Bad Request: Can't parse prices JSON object"
+		return nil, "Bad Request: can't parse prices JSON object"
 	}
 	var items []json.RawMessage
 	if json.Unmarshal([]byte(raw), &items) != nil {
-		return nil, "Bad Request: Expected an Array of LabeledPrice"
+		return nil, "Bad Request: expected an Array of LabeledPrice"
 	}
 	prices := make([]botapi.LabeledPrice, 0, len(items))
 	for _, item := range items {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(item, &fields) != nil || fields == nil {
-			return nil, "Bad Request: Can't parse LabeledPrice: LabeledPrice must be an Object"
+			return nil, "Bad Request: can't parse LabeledPrice: LabeledPrice must be an Object"
 		}
 		label, problem := jsonStringField(fields, "label")
 		if problem == "" && label == "" {
 			problem = "LabeledPrice label must be non-empty"
 		}
 		if problem != "" {
-			return nil, "Bad Request: Can't parse LabeledPrice: " + problem
+			return nil, "Bad Request: can't parse LabeledPrice: " + problem
 		}
 		amount, problem := jsonIntegerField(fields, "amount")
 		if problem != "" {
-			return nil, "Bad Request: Can't parse LabeledPrice: " + problem
+			return nil, "Bad Request: can't parse LabeledPrice: " + problem
 		}
 		prices = append(prices, botapi.LabeledPrice{Label: label, Amount: amount})
 	}
 	if len(prices) == 0 {
-		return nil, "Bad Request: There must be at least one price part"
+		return nil, "Bad Request: there must be at least one price part"
 	}
 	var total int64
 	for _, p := range prices {
 		if p.Amount < -amountMax || p.Amount > amountMax {
-			return nil, "Bad Request: Too big amount of the currency specified"
+			return nil, "Bad Request: too big amount of the currency specified"
 		}
 		total += p.Amount
 	}
 	if total <= 0 {
-		return nil, "Bad Request: Total price must be positive"
+		return nil, "Bad Request: total price must be positive"
 	}
 	if total > amountMax {
-		return nil, "Bad Request: Total price is too big"
+		return nil, "Bad Request: total price is too big"
 	}
 	return prices, ""
 }
@@ -218,7 +218,7 @@ func invoiceKeyboardProblem(markup *botapi.InlineKeyboardMarkup) string {
 func (s *Server) answerPreCheckoutQuery(w http.ResponseWriter, method string, params url.Values) {
 	ok := truthy(params.Get("ok"))
 	if !ok && params.Get("error_message") == "" {
-		s.writeError(w, method, params, 400, `Bad Request: Parameter "error_message" is required`, 0)
+		s.writeError(w, method, params, 400, `Bad Request: parameter "error_message" is required`, 0)
 		return
 	}
 	s.mu.Lock()

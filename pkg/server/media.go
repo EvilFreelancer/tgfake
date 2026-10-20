@@ -109,7 +109,7 @@ func (s *Server) resolveMedia(req *http.Request, params url.Values, kind, field 
 		}
 		u, err := url.Parse(reference)
 		if err != nil || u.Host == "" {
-			return nil, "Bad Request: Wrong HTTP URL specified"
+			return nil, "Bad Request: wrong HTTP URL specified"
 		}
 		fetchCtx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -117,11 +117,11 @@ func (s *Server) resolveMedia(req *http.Request, params url.Values, kind, field 
 		defer stop()
 		fetch, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, reference, nil)
 		if err != nil {
-			return nil, "Bad Request: Wrong HTTP URL specified"
+			return nil, "Bad Request: wrong HTTP URL specified"
 		}
 		response, err := s.opts.HTTPClient.Do(fetch)
 		if err != nil {
-			return nil, "Bad Request: Failed to get HTTP URL content"
+			return nil, "Bad Request: failed to get HTTP URL content"
 		}
 		if kind == "photo" {
 			limit = 5 << 20
@@ -131,7 +131,7 @@ func (s *Server) resolveMedia(req *http.Request, params url.Values, kind, field 
 		data, err = io.ReadAll(io.LimitReader(response.Body, limit+1))
 		_ = response.Body.Close()
 		if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
-			return nil, "Bad Request: Failed to get HTTP URL content"
+			return nil, "Bad Request: failed to get HTTP URL content"
 		}
 		name = path.Base(u.Path)
 		if name == "." || name == "/" {
@@ -407,7 +407,7 @@ func (s *Server) editMedia(w http.ResponseWriter, req *http.Request, method stri
 	if problem == "" && replacement != nil && target.msg.MediaGroupID != "" {
 		oldKind := target.file.kind
 		if (oldKind == "audio" || oldKind == "document" || replacement.kind == "audio" || replacement.kind == "document") && replacement.kind != oldKind {
-			problem = "Bad Request: Can't use the media of the specified type in the album"
+			problem = "Bad Request: can't use the media of the specified type in the album"
 		}
 	}
 	if problem != "" {

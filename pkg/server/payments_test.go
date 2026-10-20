@@ -30,29 +30,29 @@ func TestSendInvoice_Refusals(t *testing.T) {
 		want   string
 	}{
 		{"no chat", func(f url.Values) { f.Del("chat_id") }, "Bad Request: chat_id is empty"},
-		{"empty title", func(f url.Values) { f.Set("title", "") }, `Bad Request: Parameter "title" is required`},
+		{"empty title", func(f url.Values) { f.Set("title", "") }, `Bad Request: parameter "title" is required`},
 		{"title over 32 characters", func(f url.Values) { f.Set("title", strings.Repeat("т", 33)) }, "Bad Request: title is too long"},
-		{"empty description", func(f url.Values) { f.Set("description", "") }, `Bad Request: Parameter "description" is required`},
+		{"empty description", func(f url.Values) { f.Set("description", "") }, `Bad Request: parameter "description" is required`},
 		{"description over 255 characters", func(f url.Values) { f.Set("description", strings.Repeat("a", 256)) }, "Bad Request: description is too long"},
-		{"empty payload", func(f url.Values) { f.Set("payload", "") }, `Bad Request: Parameter "payload" is required`},
-		{"a payload that is not UTF-8", func(f url.Values) { f.Set("payload", "\xff") }, "Bad Request: The payload must be encoded in UTF-8"},
+		{"empty payload", func(f url.Values) { f.Set("payload", "") }, `Bad Request: parameter "payload" is required`},
+		{"a payload that is not UTF-8", func(f url.Values) { f.Set("payload", "\xff") }, "Bad Request: the payload must be encoded in UTF-8"},
 		{"payload over 128 bytes", func(f url.Values) { f.Set("payload", strings.Repeat("я", 65)) }, "Bad Request: payload is too long"},
-		{"empty currency", func(f url.Values) { f.Set("currency", "") }, `Bad Request: Parameter "currency" is required`},
-		{"no prices", func(f url.Values) { f.Del("prices") }, `Bad Request: Parameter "prices" is required`},
-		{"prices that are not JSON", func(f url.Values) { f.Set("prices", `[{amount:1}]`) }, "Bad Request: Can't parse prices JSON object"},
-		{"prices not a list", func(f url.Values) { f.Set("prices", `{"amount":1}`) }, "Bad Request: Expected an Array of LabeledPrice"},
-		{"a price that is not an object", func(f url.Values) { f.Set("prices", `[150]`) }, "Bad Request: Can't parse LabeledPrice: LabeledPrice must be an Object"},
-		{"a price with no label", func(f url.Values) { f.Set("prices", `[{"amount":150}]`) }, `Bad Request: Can't parse LabeledPrice: Can't find field "label"`},
-		{"a price with an empty label", func(f url.Values) { f.Set("prices", `[{"label":"","amount":150}]`) }, "Bad Request: Can't parse LabeledPrice: LabeledPrice label must be non-empty"},
-		{"a price with no amount", func(f url.Values) { f.Set("prices", `[{"label":"x"}]`) }, `Bad Request: Can't parse LabeledPrice: Can't find field "amount"`},
-		{"an amount that is not a number", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":"lots"}]`) }, `Bad Request: Can't parse LabeledPrice: Field "amount" must be a valid Number`},
-		{"no price in the list", func(f url.Values) { f.Set("prices", `[]`) }, "Bad Request: There must be at least one price part"},
-		{"an amount past the largest", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":1000000000000}]`) }, "Bad Request: Too big amount of the currency specified"},
-		{"a total of zero", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":0}]`) }, "Bad Request: Total price must be positive"},
+		{"empty currency", func(f url.Values) { f.Set("currency", "") }, `Bad Request: parameter "currency" is required`},
+		{"no prices", func(f url.Values) { f.Del("prices") }, `Bad Request: parameter "prices" is required`},
+		{"prices that are not JSON", func(f url.Values) { f.Set("prices", `[{amount:1}]`) }, "Bad Request: can't parse prices JSON object"},
+		{"prices not a list", func(f url.Values) { f.Set("prices", `{"amount":1}`) }, "Bad Request: expected an Array of LabeledPrice"},
+		{"a price that is not an object", func(f url.Values) { f.Set("prices", `[150]`) }, "Bad Request: can't parse LabeledPrice: LabeledPrice must be an Object"},
+		{"a price with no label", func(f url.Values) { f.Set("prices", `[{"amount":150}]`) }, `Bad Request: can't parse LabeledPrice: Can't find field "label"`},
+		{"a price with an empty label", func(f url.Values) { f.Set("prices", `[{"label":"","amount":150}]`) }, "Bad Request: can't parse LabeledPrice: LabeledPrice label must be non-empty"},
+		{"a price with no amount", func(f url.Values) { f.Set("prices", `[{"label":"x"}]`) }, `Bad Request: can't parse LabeledPrice: Can't find field "amount"`},
+		{"an amount that is not a number", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":"lots"}]`) }, `Bad Request: can't parse LabeledPrice: Field "amount" must be a valid Number`},
+		{"no price in the list", func(f url.Values) { f.Set("prices", `[]`) }, "Bad Request: there must be at least one price part"},
+		{"an amount past the largest", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":1000000000000}]`) }, "Bad Request: too big amount of the currency specified"},
+		{"a total of zero", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":0}]`) }, "Bad Request: total price must be positive"},
 		{"a discount past the price", func(f url.Values) {
 			f.Set("currency", "USD")
 			f.Set("prices", `[{"label":"Fee","amount":100},{"label":"Discount","amount":-150}]`)
-		}, "Bad Request: Total price must be positive"},
+		}, "Bad Request: total price must be positive"},
 		{"Stars with two prices", func(f url.Values) {
 			f.Set("prices", `[{"label":"a","amount":1},{"label":"b","amount":2}]`)
 		}, "Bad Request: prices must contain exactly one item"},
@@ -139,7 +139,7 @@ func TestAnswerPreCheckoutQuery_Refusals(t *testing.T) {
 	status, body = s.call("answerPreCheckoutQuery", url.Values{
 		"pre_checkout_query_id": {"pcq-1"}, "ok": {"false"},
 	})
-	if status != http.StatusBadRequest || body["description"] != `Bad Request: Parameter "error_message" is required` {
+	if status != http.StatusBadRequest || body["description"] != `Bad Request: parameter "error_message" is required` {
 		t.Fatalf("a refusal with no message: %d %v", status, body)
 	}
 }

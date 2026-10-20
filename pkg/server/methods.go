@@ -406,15 +406,12 @@ func (s *Server) sendChatAction(w http.ResponseWriter, method string, params url
 
 func (s *Server) answerCallbackQuery(w http.ResponseWriter, method string, params url.Values) {
 	id := params.Get("callback_query_id")
-	if id == "" {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: callback_query_id is empty", 0)
-		return
-	}
 	answer := CallbackAnswer{ID: id, Text: params.Get("text"), ShowAlert: truthy(params.Get("show_alert"))}
 	s.mu.Lock()
 	// The query names no chat; the tap that minted it does. A query the fake
-	// never issued, one minted before a Reset and one already answered are
-	// refused the way Telegram refuses an answer to a query it does not know.
+	// never issued, an empty id, one minted before a Reset and one already
+	// answered are refused the way Telegram refuses an answer to a query it
+	// does not know.
 	chatID, known := s.cbqChat[id]
 	if !known {
 		s.mu.Unlock()
@@ -604,7 +601,7 @@ func replyTargetLocked(chat *chatState, params url.Values) (*botapi.Message, str
 
 // inlineKeyboardNotArray is what Telegram answers when reply_markup names
 // inline_keyboard with a value that is not an array.
-const inlineKeyboardNotArray = `Bad Request: Field "inline_keyboard" must be of type Array`
+const inlineKeyboardNotArray = `Bad Request: field "inline_keyboard" must be of type Array`
 
 // parseKeyboard reads reply_markup; a markup of another kind (a reply
 // keyboard, a remove) is not an inline keyboard and reads as none, and so does
@@ -659,7 +656,7 @@ func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string, payAllow
 			}
 			switch {
 			case actions == 0:
-				return "Bad Request: Text buttons are not allowed in the inline keyboard"
+				return "Bad Request: can't parse InlineKeyboardButton: Text buttons are not allowed in the inline keyboard"
 			case actions > 1:
 				// Telegram takes the first action in its own order; the
 				// stand refuses the button, so an ambiguous one never passes.

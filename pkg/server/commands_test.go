@@ -18,53 +18,57 @@ func TestSetMyCommands_Refusals(t *testing.T) {
 		want string
 	}{
 		{"commands that are not JSON", url.Values{"commands": {`nope`}},
-			"Bad Request: Can't parse commands JSON object"},
+			"Bad Request: can't parse commands JSON object"},
 		{"commands that are not a list", url.Values{"commands": {`{"command":"start"}`}},
-			"Bad Request: Expected an Array of BotCommand"},
+			"Bad Request: expected an Array of BotCommand"},
 		{"a command that is not an object", url.Values{"commands": {`["start"]`}},
-			"Bad Request: Can't parse BotCommand: expected an Object"},
+			"Bad Request: can't parse BotCommand: expected an Object"},
 		{"a command with no command", url.Values{"commands": {`[{"description":"Start"}]`}},
-			`Bad Request: Can't parse BotCommand: Can't find field "command"`},
+			`Bad Request: can't parse BotCommand: Can't find field "command"`},
 		{"a command with no description", url.Values{"commands": {`[{"command":"start"}]`}},
-			`Bad Request: Can't parse BotCommand: Can't find field "description"`},
+			`Bad Request: can't parse BotCommand: Can't find field "description"`},
 		{"a command that is only a slash", url.Values{"commands": {`[{"command":" / ","description":"Start"}]`}},
-			"Bad Request: Command must be non-empty"},
+			"Bad Request: command must be non-empty"},
 		{"a command over 32 characters", url.Values{"commands": {`[{"command":"` + strings.Repeat("a", 33) + `","description":"Start"}]`}},
-			"Bad Request: Command length must not exceed 32"},
+			"Bad Request: command length must not exceed 32"},
+		{"a command in capitals", url.Values{"commands": {`[{"command":"Start","description":"Start"}]`}},
+			"Bad Request: BOT_COMMAND_INVALID"},
+		{"a command with a hyphen", url.Values{"commands": {`[{"command":"my-cmd","description":"Start"}]`}},
+			"Bad Request: BOT_COMMAND_INVALID"},
 		{"a blank description", url.Values{"commands": {`[{"command":"start","description":"  "}]`}},
-			"Bad Request: Command description must be non-empty"},
+			"Bad Request: command description must be non-empty"},
 		{"a description over 256 characters", url.Values{"commands": {`[{"command":"start","description":"` + strings.Repeat("d", 257) + `"}]`}},
-			"Bad Request: Command description length must not exceed 256"},
+			"Bad Request: command description length must not exceed 256"},
 		{"a scope that is not JSON", url.Values{"commands": {`[]`}, "scope": {`{type:chat}`}},
-			"Bad Request: Can't parse BotCommandScope JSON object"},
+			"Bad Request: can't parse BotCommandScope JSON object"},
 		{"a scope that is not an object", url.Values{"commands": {`[]`}, "scope": {`["chat"]`}},
-			"Bad Request: Can't parse BotCommandScope: BotCommandScope must be an Object"},
+			"Bad Request: can't parse BotCommandScope: BotCommandScope must be an Object"},
 		{"a scope of no known type", url.Values{"commands": {`[]`}, "scope": {`{"type":"everyone"}`}},
-			"Bad Request: Can't parse BotCommandScope: Unsupported type specified"},
+			"Bad Request: can't parse BotCommandScope: Unsupported type specified"},
 		{"a scope with no type", url.Values{"commands": {`[]`}, "scope": {`{"chat_id":1}`}},
-			`Bad Request: Can't parse BotCommandScope: Can't find field "type"`},
+			`Bad Request: can't parse BotCommandScope: Can't find field "type"`},
 		{"a scope whose type is not a string", url.Values{"commands": {`[]`}, "scope": {`{"type":true}`}},
-			`Bad Request: Can't parse BotCommandScope: Field "type" must be of type String`},
+			`Bad Request: can't parse BotCommandScope: Field "type" must be of type String`},
 		{"a chat scope with no chat", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat"}`}},
-			`Bad Request: Can't parse BotCommandScope: Can't find field "chat_id"`},
+			`Bad Request: can't parse BotCommandScope: Can't find field "chat_id"`},
 		{"a chat scope with an empty chat", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat","chat_id":""}`}},
-			"Bad Request: Can't parse BotCommandScope: Empty chat_id specified"},
+			"Bad Request: can't parse BotCommandScope: Empty chat_id specified"},
 		{"a chat scope naming a username", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat","chat_id":"@alice"}`}},
 			"Bad Request: chat not found"},
 		{"a chat_member scope with no user", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_member","chat_id":-100}`}},
-			`Bad Request: Can't parse BotCommandScope: Can't find field "user_id"`},
+			`Bad Request: can't parse BotCommandScope: Can't find field "user_id"`},
 		{"a chat_member scope with a user that is not a number", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_member","chat_id":-100,"user_id":"alice"}`}},
-			`Bad Request: Can't parse BotCommandScope: Field "user_id" must be a valid Number`},
+			`Bad Request: can't parse BotCommandScope: Field "user_id" must be a valid Number`},
 		{"a chat_member scope with user 0", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_member","chat_id":-100,"user_id":0}`}},
-			"Bad Request: Can't parse BotCommandScope: Invalid user_id specified"},
+			"Bad Request: can't parse BotCommandScope: Invalid user_id specified"},
 		{"an administrators scope of a private chat", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_administrators","chat_id":4242}`}},
-			"Bad Request: Can't use specified scope in private chats"},
+			"Bad Request: can't use specified scope in private chats"},
 		{"a member scope of a private chat", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_member","chat_id":4242,"user_id":4242}`}},
-			"Bad Request: Can't use specified scope in private chats"},
+			"Bad Request: can't use specified scope in private chats"},
 		{"a language that is not two letters", url.Values{"commands": {`[]`}, "language_code": {"eng"}},
-			"Bad Request: Invalid language code specified"},
+			"Bad Request: invalid language code specified"},
 		{"a language in capitals", url.Values{"commands": {`[]`}, "language_code": {"EN"}},
-			"Bad Request: Invalid language code specified"},
+			"Bad Request: invalid language code specified"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -83,11 +87,11 @@ func TestGetMyCommands_RefusesTheSameScopes(t *testing.T) {
 	s := newStand(t, Options{})
 	for _, method := range []string{"getMyCommands", "deleteMyCommands"} {
 		status, body := s.call(method, url.Values{"scope": {`{"type":"chat"}`}})
-		if status != http.StatusBadRequest || body["description"] != `Bad Request: Can't parse BotCommandScope: Can't find field "chat_id"` {
+		if status != http.StatusBadRequest || body["description"] != `Bad Request: can't parse BotCommandScope: Can't find field "chat_id"` {
 			t.Fatalf("%s with no chat: %d %v", method, status, body)
 		}
 		status, body = s.call(method, url.Values{"language_code": {"english"}})
-		if status != http.StatusBadRequest || body["description"] != "Bad Request: Invalid language code specified" {
+		if status != http.StatusBadRequest || body["description"] != "Bad Request: invalid language code specified" {
 			t.Fatalf("%s with a bad language: %d %v", method, status, body)
 		}
 	}
@@ -155,11 +159,11 @@ func TestCommandsFor_WalksTheDocumentedChain(t *testing.T) {
 	register("", "", "default")
 	register(`{"type":"all_private_chats"}`, "", "private")
 	register(`{"type":"chat","chat_id":4242}`, "", "chat")
-	register(`{"type":"chat","chat_id":4242}`, "en", "chat-en")
+	register(`{"type":"chat","chat_id":4242}`, "en", "chat_en")
 
 	// A private chat chain: chat+language, chat, all_private_chats, default.
 	cases := []struct{ scope, language, want string }{
-		{`{"type":"chat","chat_id":4242}`, "en", "chat-en"},
+		{`{"type":"chat","chat_id":4242}`, "en", "chat_en"},
 		{`{"type":"chat","chat_id":4242}`, "ru", "chat"},
 		{`{"type":"chat","chat_id":4243}`, "en", "private"},
 		{`{"type":"all_private_chats"}`, "en", "private"},
@@ -174,21 +178,21 @@ func TestCommandsFor_WalksTheDocumentedChain(t *testing.T) {
 
 	// A list for another language answers nothing and leaves a wider scope
 	// to answer, rather than blocking it.
-	register(`{"type":"chat","chat_id":5252}`, "en", "other-en")
+	register(`{"type":"chat","chat_id":5252}`, "en", "other_en")
 	if got := shown(`{"type":"chat","chat_id":5252}`, "ru"); got != "private" {
 		t.Fatalf("a language with no list: %q, want the wider scope's", got)
 	}
 
 	// A group has no all_private_chats in its chain.
 	register(`{"type":"all_group_chats"}`, "", "group")
-	register(`{"type":"chat","chat_id":-100}`, "", "group-chat")
-	if got := shown(`{"type":"chat","chat_id":-100}`, "en"); got != "group-chat" {
+	register(`{"type":"chat","chat_id":-100}`, "", "group_chat")
+	if got := shown(`{"type":"chat","chat_id":-100}`, "en"); got != "group_chat" {
 		t.Fatalf("group chat: %q", got)
 	}
 	if got := shown(`{"type":"chat","chat_id":-200}`, "en"); got != "group" {
 		t.Fatalf("another group: %q", got)
 	}
-	if got := shown(`{"type":"chat","chat_id":-100}`, ""); got != "group-chat" {
+	if got := shown(`{"type":"chat","chat_id":-100}`, ""); got != "group_chat" {
 		t.Fatalf("group chat with no language: %q", got)
 	}
 }
@@ -220,7 +224,7 @@ func TestCommandsFor_AdministratorScopesServeAdministrators(t *testing.T) {
 
 	register("", "default")
 	register(`{"type":"chat_administrators","chat_id":-100}`, "admins")
-	register(`{"type":"all_chat_administrators"}`, "all-admins")
+	register(`{"type":"all_chat_administrators"}`, "all_admins")
 
 	// The owner of the group reaches the chat's administrators.
 	if got := shown(`{"type":"chat_member","chat_id":-100,"user_id":4242}`); got != "admins" {
@@ -239,10 +243,10 @@ func TestCommandsFor_AdministratorScopesServeAdministrators(t *testing.T) {
 	if status, body := s.call("deleteMyCommands", url.Values{"scope": {`{"type":"chat_administrators","chat_id":-100}`}}); status != http.StatusOK {
 		t.Fatalf("deleteMyCommands: %d %v", status, body)
 	}
-	if got := shown(`{"type":"chat_member","chat_id":-100,"user_id":4242}`); got != "all-admins" {
+	if got := shown(`{"type":"chat_member","chat_id":-100,"user_id":4242}`); got != "all_admins" {
 		t.Fatalf("after deleting the chat's list: %q", got)
 	}
-	if got := shown(`{"type":"chat_administrators","chat_id":-100}`); got != "all-admins" {
+	if got := shown(`{"type":"chat_administrators","chat_id":-100}`); got != "all_admins" {
 		t.Fatalf("administrators scope after deleting the chat's list: %q", got)
 	}
 	// The administrators of every group read the lists of every group next.

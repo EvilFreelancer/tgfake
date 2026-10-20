@@ -109,7 +109,7 @@ func (c commandScope) wire() botapi.BotCommandScope {
 // scopeProblem is the description of a scope the Bot API server cannot read:
 // it prefixes the reason the way the server does.
 func scopeProblem(reason string) string {
-	return "Bad Request: Can't parse BotCommandScope: " + reason
+	return "Bad Request: can't parse BotCommandScope: " + reason
 }
 
 // parseCommandScope reads the scope of a commands call the way the Bot API
@@ -122,7 +122,7 @@ func parseCommandScope(raw string) (commandScope, string, string) {
 		return defaultCommandScope, "", ""
 	}
 	if !json.Valid([]byte(raw)) {
-		return defaultCommandScope, "", "Bad Request: Can't parse BotCommandScope JSON object"
+		return defaultCommandScope, "", "Bad Request: can't parse BotCommandScope JSON object"
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil || fields == nil {
@@ -219,10 +219,10 @@ func (s *Server) resolveScopeChatLocked(scope *commandScope, chat string) string
 	switch s.chatTypeLocked(id) {
 	case "private":
 		if scope.kind != "chat" {
-			return "Bad Request: Can't use specified scope in private chats"
+			return "Bad Request: can't use specified scope in private chats"
 		}
 	case "channel":
-		return "Bad Request: Can't change commands in channel chats"
+		return "Bad Request: can't change commands in channel chats"
 	}
 	return ""
 }
@@ -236,7 +236,7 @@ func languageCodeProblem(code string) string {
 	if len(code) == 2 && 'a' <= code[0] && code[0] <= 'z' && 'a' <= code[1] && code[1] <= 'z' {
 		return ""
 	}
-	return "Bad Request: Invalid language code specified"
+	return "Bad Request: invalid language code specified"
 }
 
 // commandKeyOf reads the scope and the language a commands call names, in
@@ -265,28 +265,28 @@ func parseCommands(raw string) ([]botapi.BotCommand, string) {
 		return cmds, ""
 	}
 	if !json.Valid([]byte(raw)) {
-		return nil, "Bad Request: Can't parse commands JSON object"
+		return nil, "Bad Request: can't parse commands JSON object"
 	}
 	var items []json.RawMessage
 	if json.Unmarshal([]byte(raw), &items) != nil {
-		return nil, "Bad Request: Expected an Array of BotCommand"
+		return nil, "Bad Request: expected an Array of BotCommand"
 	}
 	for _, item := range items {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(item, &fields) != nil || fields == nil {
-			return nil, "Bad Request: Can't parse BotCommand: expected an Object"
+			return nil, "Bad Request: can't parse BotCommand: expected an Object"
 		}
 		command, problem := jsonStringField(fields, "command")
 		if problem != "" {
-			return nil, "Bad Request: Can't parse BotCommand: " + problem
+			return nil, "Bad Request: can't parse BotCommand: " + problem
 		}
 		description, problem := jsonStringField(fields, "description")
 		if problem != "" {
-			return nil, "Bad Request: Can't parse BotCommand: " + problem
+			return nil, "Bad Request: can't parse BotCommand: " + problem
 		}
 		cmd := botapi.BotCommand{Command: command, Description: description}
 		if raw, ok := fields["is_ephemeral"]; ok && json.Unmarshal(raw, &cmd.IsEphemeral) != nil {
-			return nil, `Bad Request: Can't parse BotCommand: Field "is_ephemeral" must be of type Boolean`
+			return nil, `Bad Request: can't parse BotCommand: Field "is_ephemeral" must be of type Boolean`
 		}
 		cmds = append(cmds, cmd)
 	}
@@ -300,8 +300,9 @@ const (
 )
 
 // tidyCommands trims every command and description, drops a leading slash
-// from a command and refuses an empty or overlong one, the way Telegram does
-// before it stores the list. It returns the commands as Telegram keeps them.
+// from a command and refuses an empty or overlong one, then a command with a
+// character Telegram does not take, the way Telegram does before it stores the
+// list. It returns the commands as Telegram keeps them.
 func tidyCommands(cmds []botapi.BotCommand) ([]botapi.BotCommand, string) {
 	out := make([]botapi.BotCommand, 0, len(cmds))
 	for _, cmd := range cmds {
@@ -309,15 +310,24 @@ func tidyCommands(cmds []botapi.BotCommand) ([]botapi.BotCommand, string) {
 		cmd.Description = strings.TrimSpace(cmd.Description)
 		switch {
 		case cmd.Command == "":
-			return nil, "Bad Request: Command must be non-empty"
+			return nil, "Bad Request: command must be non-empty"
 		case utf8.RuneCountInString(cmd.Command) > commandMax:
-			return nil, "Bad Request: Command length must not exceed " + strconv.Itoa(commandMax)
+			return nil, "Bad Request: command length must not exceed " + strconv.Itoa(commandMax)
 		case cmd.Description == "":
-			return nil, "Bad Request: Command description must be non-empty"
+			return nil, "Bad Request: command description must be non-empty"
 		case utf8.RuneCountInString(cmd.Description) > commandDescriptionMax:
-			return nil, "Bad Request: Command description length must not exceed " + strconv.Itoa(commandDescriptionMax)
+			return nil, "Bad Request: command description length must not exceed " + strconv.Itoa(commandDescriptionMax)
 		}
 		out = append(out, cmd)
+	}
+	// Telegram itself then refuses a command with anything but lower-case
+	// Latin letters, digits and underscores.
+	for _, cmd := range out {
+		for _, r := range cmd.Command {
+			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+				return nil, "Bad Request: BOT_COMMAND_INVALID"
+			}
+		}
 	}
 	return out, ""
 }

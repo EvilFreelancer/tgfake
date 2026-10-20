@@ -144,7 +144,7 @@ func TestKeyboard_CallbackDataLimit(t *testing.T) {
 	}
 	status, body = s.call("editMessageText", url.Values{"chat_id": {"4242"}, "message_id": {"1"}, "text": {"menu 2"},
 		"reply_markup": {`{"inline_keyboard":[[{"text":"no action"}]]}`}})
-	if status != http.StatusBadRequest || body["description"] != "Bad Request: Text buttons are not allowed in the inline keyboard" {
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: can't parse InlineKeyboardButton: Text buttons are not allowed in the inline keyboard" {
 		t.Fatalf("a button with nothing behind it: %d %v", status, body)
 	}
 	status, _ = s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"link"},
@@ -160,7 +160,7 @@ func TestKeyboard_CallbackDataLimit(t *testing.T) {
 // nothing at all to a real chat. A markup without the key (another kind of
 // keyboard) and an array, an empty one too, still go through.
 func TestKeyboard_InlineKeyboardMustBeAnArray(t *testing.T) {
-	const refusal = `Bad Request: Field "inline_keyboard" must be of type Array`
+	const refusal = `Bad Request: field "inline_keyboard" must be of type Array`
 	s := newStand(t, Options{})
 	for _, markup := range []string{`{"inline_keyboard":null}`, `{"inline_keyboard":{}}`, `{"inline_keyboard":"[]"}`, `{"inline_keyboard":0}`} {
 		status, body := s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {markup}})
@@ -512,9 +512,12 @@ func TestReplyToMissingMessageIsRefused(t *testing.T) {
 // Telegram calls too old or invalid, and a Reset forgets the ids with the rest.
 func TestAnswerCallbackQuery_UnknownIDIsRefused(t *testing.T) {
 	s := newStand(t, Options{})
-	status, body := s.call("answerCallbackQuery", url.Values{"callback_query_id": {"cbq-99"}})
-	if status != http.StatusBadRequest || !strings.Contains(body["description"].(string), "query ID is invalid") {
-		t.Fatalf("unknown query: %d %v", status, body)
+	for _, id := range []string{"cbq-99", ""} {
+		status, body := s.call("answerCallbackQuery", url.Values{"callback_query_id": {id}})
+		if status != http.StatusBadRequest ||
+			body["description"] != "Bad Request: query is too old and response timeout expired or query ID is invalid" {
+			t.Fatalf("unknown query %q: %d %v", id, status, body)
+		}
 	}
 	s.fake.InjectMessage(IncomingMessage{Text: "/model"})
 	s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {`{"inline_keyboard":[[{"text":"model-b","callback_data":"model:stub/model-b"}]]}`}})
@@ -709,7 +712,7 @@ func TestWebAppButton_URLRules(t *testing.T) {
 	// A button with no action at all is refused the way Telegram does.
 	status, body = s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"open"},
 		"reply_markup": {`{"inline_keyboard":[[{"text":"App"}]]}`}})
-	if status != http.StatusBadRequest || body["description"] != "Bad Request: Text buttons are not allowed in the inline keyboard" {
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: can't parse InlineKeyboardButton: Text buttons are not allowed in the inline keyboard" {
 		t.Fatalf("a button with no action: %d %v", status, body)
 	}
 }
