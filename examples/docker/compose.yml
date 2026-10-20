@@ -1,7 +1,7 @@
 services:
   tgfake:
     image: ${TGFAKE_IMAGE:?Set TGFAKE_IMAGE to a published tag or local build}
-    command: ["--addr", "0.0.0.0:18790", "--allow-http-webhook", "--token", "123456:TEST"]
+    command: ["--allow-http-webhook", "--token", "123456:TEST"]
     ports:
       - "127.0.0.1:${TGFAKE_PORT:-18790}:18790"
     healthcheck:

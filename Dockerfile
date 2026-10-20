@@ -15,5 +15,5 @@ RUN apk add --no-cache ca-certificates
 COPY --from=build /out/tgfake /usr/local/bin/tgfake
 USER 65532:65532
 EXPOSE 18790
-ENTRYPOINT ["tgfake"]
-CMD ["--addr", "0.0.0.0:18790"]
+# Arguments after the image name are added to these, and a later --addr wins.
+ENTRYPOINT ["tgfake", "--addr", "0.0.0.0:18790"]

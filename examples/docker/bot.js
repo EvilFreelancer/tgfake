@@ -16,13 +16,17 @@ const server = http.createServer(async (req, res) => {
   try {
     let body = '';
     for await (const chunk of req) body += chunk;
-    const update = JSON.parse(body);
-    const response = await fetch(`${api}/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: update.message.chat.id, text: `You said: ${update.message.text}` }),
-    });
-    if (!response.ok) throw new Error(`sendMessage returned ${response.status}`);
+    const { message } = JSON.parse(body);
+    // Only text messages get an answer, but every update is confirmed: one
+    // answered with an error is retried and holds back the updates after it.
+    if (typeof message?.text === 'string') {
+      const response = await fetch(`${api}/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: message.chat.id, text: `You said: ${message.text}` }),
+      });
+      if (!response.ok) throw new Error(`sendMessage returned ${response.status}`);
+    }
     res.writeHead(200).end();
   } catch (error) {
     console.error(error);

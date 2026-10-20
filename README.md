@@ -36,8 +36,8 @@ purpose. No token, no phone, no network.
   JavaScript handlers and authenticated Mini App endpoints in Docker, with
   the platform SDK and a shared SQLite database. Node.js stays in the
   container; [serverless.md](docs/serverless.md) covers the runtime and its limits.
-- **Two ways in.** A single static binary for Linux, macOS and Windows, or a
-  Go package to run in-process on `httptest`.
+- **Three ways in.** A single static binary for Linux, macOS and Windows, a
+  container image, or a Go package to run in-process on `httptest`.
 
 ## Install
 
@@ -64,14 +64,15 @@ In GitHub Actions, the [action](docs/ci.md) installs it and can start it:
     args: --llm
 ```
 
-## Docker
+Each release, from the one that introduces it, also publishes a container
+image for Linux amd64 and arm64. It runs as a non-root user and listens on
+`0.0.0.0:18790`; flags after the image name are added to that:
 
-The release workflow publishes `ghcr.io/evilfreelancer/tgfake:<version>` for Linux amd64 and arm64, starting with the first release that includes Docker support. Forks publish under their own repository name. The container listens on `0.0.0.0:18790` and runs as a non-root user.
-
-To run tgfake next to a webhook bot, point the bot's API origin at `http://tgfake:18790` and start tgfake with `--addr 0.0.0.0:18790 --allow-http-webhook`. The opt-in flag accepts HTTP callbacks such as `http://bot:8080/webhook`; the default still applies Telegram's HTTPS rules. See the [Docker Compose example](docs/docker.md) for a working echo bot and local builds.
+```bash
+docker run --rm -p 127.0.0.1:18790:18790 ghcr.io/evilfreelancer/tgfake:<version> --llm
+```
 
 ## Quick start
-
 
 Start the stand:
 
@@ -147,6 +148,12 @@ library and its tests; [docs/go.md](docs/go.md) covers the whole Go API.
 can start it in the background; [docs/ci.md](docs/ci.md) has workflows for
 GitHub Actions and the install script for everything else.
 
+**Docker Compose.** A bot in its own container reaches the stand by its
+service name, `http://tgfake:18790`. A webhook bot registers an address such
+as `http://bot:8080/webhook`, which Telegram's HTTPS rules refuse, so the
+stand is started with `--allow-http-webhook` to accept it.
+[docs/docker.md](docs/docker.md) has a working example with an echo bot.
+
 ## Documentation
 
 | Page | What it covers |
@@ -159,6 +166,7 @@ GitHub Actions and the install script for everything else.
 | [docs/serverless.md](docs/serverless.md) | Local tgcloud projects in Docker: handlers, SDK, SQLite, authenticated endpoints and Go tests. |
 | [docs/go.md](docs/go.md) | Using the packages from Go tests: `server`, `botapi`, `webapp`, `llmstub`. |
 | [docs/ci.md](docs/ci.md) | The GitHub Action, the install script and running the stand in other CI systems. |
+| [docs/docker.md](docs/docker.md) | The container image, a Docker Compose example with a webhook bot and `--allow-http-webhook`. |
 | [docs/development.md](docs/development.md) | Building, testing, the layout of the repository and cutting a release. |
 
 ## History
