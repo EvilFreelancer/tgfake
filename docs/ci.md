@@ -262,7 +262,7 @@ The binary lands in `$(go env GOPATH)/bin` (or `GOBIN`) and reports the module v
 
 The `docker` job of the [release workflow](../.github/workflows/release.yaml) publishes Linux amd64 and arm64 images to `ghcr.io/evilfreelancer/tgfake` after the release job succeeds. Image tags are the version without `v`, its major/minor and major version, and `latest` for stable releases. Prereleases get their full version tag only. The binary reports the release tag through `--version`. Container publication starts with the first release that includes this job; older releases have no images.
 
-The image listens on `0.0.0.0:18790`, so other containers of the same network reach it by its name, for example `http://tgfake:18790`, and flags such as `--llm` follow the image name in `docker run`. It can also serve as a GitLab CI `services:` entry.
+The image listens on `0.0.0.0:18790`, so other containers of the same network reach it by its name, for example `http://tgfake:18790`, and flags such as `--llm` follow the image name in `docker run`.
 
 Pull requests build the image without publishing it and run [`scripts/test-docker.sh`](../scripts/test-docker.sh). That test uses Docker Compose to start tgfake and an echo bot in separate containers, registers `http://bot:8080/webhook` with a secret, injects a message and checks the reply, then checks that a callback query does not hold back the next message. The container test is included in the `CI` gate.
 

@@ -2,7 +2,7 @@
 
 The image runs the static tgfake binary as UID/GID 65532, includes CA certificates for outgoing HTTPS requests, and listens on `0.0.0.0:18790`. It needs no persistent volume: chats, files and updates live in memory. Stopping the container sends SIGTERM to tgfake and releases held requests.
 
-The entrypoint is `tgfake --addr 0.0.0.0:18790`, and arguments after the image name are added to it, so any flag of [command.md](command.md) can follow. An `--addr` among them takes precedence, because the last one given wins:
+The entrypoint is `tgfake --addr 0.0.0.0:18790`, and arguments after the image name are added to it, so any flag of [command.md](command.md) can follow. An `--addr` among them takes precedence, because the last one given wins; publish the port it names instead of 18790:
 
 ```bash
 docker run --rm -p 127.0.0.1:18790:18790 tgfake:local --llm
