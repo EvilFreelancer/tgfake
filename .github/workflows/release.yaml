@@ -1,7 +1,8 @@
 # Publish a release when a vX.Y.Z tag is pushed: GoReleaser builds every
 # archive and checksums.txt (.goreleaser.yaml) and attaches them to a GitHub
 # release, then the action in action.yml installs that release on each
-# runner system and starts it, which is what a bot's own workflow will do.
+# runner system and starts it, which is what a bot's own workflow will do,
+# and the docker job pushes the container image of the Dockerfile to GHCR.
 # The tag is also the Go module version: go install ...@vX.Y.Z and a go.mod
 # require line resolve to the same commit.
 

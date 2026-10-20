@@ -10,7 +10,8 @@ paths:
 
 `README.md` is the landing page; `docs/` is the reference, one page per
 surface: `command.md`, `bot-api.md`, `sim-api.md`, `mini-apps.md`,
-`scripted-model.md`, `go.md`, `ci.md`, `development.md`.
+`scripted-model.md`, `serverless.md`, `go.md`, `ci.md`, `docker.md`,
+`development.md`. The README's documentation table links every page.
 
 - A change that a user can see carries its documentation in the same commit: a
   method, a refusal, a route, a flag, an option field, an action input.

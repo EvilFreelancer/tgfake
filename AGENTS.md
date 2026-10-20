@@ -20,8 +20,9 @@ in-process. `README.md` is the landing page; `docs/` is the reference.
 | `internal/chatpage` | The chat page, one self-contained HTML file embedded into the binary; it reads everything from the simulation API. |
 | `features/` | Gherkin specs of the happy paths, run by godog harnesses in the owning package (`pkg/server/bdd_*_test.go`, `cmd/tgfake/bdd_command_test.go`). |
 | `examples/echobot`, `examples/shell` | A standard-library bot with its in-process tests, and an any-language integration test driving the binary and a bot process with curl. |
+| `Dockerfile`, `examples/docker`, `scripts/test-docker.sh` | The container image (a static build on Alpine, non-root, `--addr 0.0.0.0:18790` in its entrypoint), a Compose example with a Node.js webhook echo bot behind `--allow-http-webhook`, and its end-to-end test. |
 | `scripts/install.sh`, `action.yml` | The release installer (checksum-verified) and the composite GitHub Action built on it. `scripts/test-install.sh` checks the installer against a snapshot. |
-| `.goreleaser.yaml`, `.github/workflows/` | Release archives and checksums; `ci.yaml` (test matrix, lint, a release snapshot installed on three systems with `bot-e2e.sh` on Linux, gate job `CI`) and `release.yaml` (publish on a `vX.Y.Z` tag, then install it on three systems). |
+| `.goreleaser.yaml`, `.github/workflows/` | Release archives and checksums; `ci.yaml` (test matrix, lint, a release snapshot installed on three systems with `bot-e2e.sh` on Linux, the container webhook test, gate job `CI`) and `release.yaml` (publish on a `vX.Y.Z` tag, then install it on three systems and push the image to `ghcr.io/evilfreelancer/tgfake`). |
 
 ## Commands
 
@@ -33,6 +34,7 @@ make run            # the stand with its scripted model on 127.0.0.1:18790
 make snapshot       # every release archive into dist/, nothing published (needs goreleaser)
 make install-test   # scripts/install.sh against the snapshot in dist/
 examples/shell/bot-e2e.sh   # the binary and the example bot, driven through /sim/
+docker build -t tgfake:local . && TGFAKE_IMAGE=tgfake:local sh scripts/test-docker.sh   # the image and a webhook bot in Compose
 ```
 
 Go 1.22 is the oldest toolchain the module admits (`go.mod`); CI tests it next

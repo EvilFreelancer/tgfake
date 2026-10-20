@@ -230,6 +230,9 @@ jobs:
           cat "$TGFAKE_LOG" >&2
           exit 1
 
+  # The image of the Dockerfile and the Compose example of examples/docker: a
+  # bot in its own container gets a webhook over the Compose network
+  # (--allow-http-webhook) and answers through the Bot API.
   docker:
     name: Container webhook test
     runs-on: ubuntu-latest
