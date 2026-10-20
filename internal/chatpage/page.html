@@ -206,6 +206,14 @@
       else if (m.location) box.appendChild(el('div', '', '[location ' + m.location.latitude + ', ' + m.location.longitude + ']'));
       if (m.contact) box.appendChild(el('div', '', '[contact ' + m.contact.first_name + '] ' + m.contact.phone_number));
       if (m.web_app_data) box.appendChild(el('div', '', '[web_app_data ' + m.web_app_data.button_text + '] ' + m.web_app_data.data));
+      if (m.invoice) box.appendChild(el('div', '', '[invoice ' + m.invoice.title + ' ' + m.invoice.total_amount + ' ' + m.invoice.currency + '] ' + m.invoice.description));
+      if (m.successful_payment) box.appendChild(el('div', '', '[payment ' + m.successful_payment.total_amount + ' ' + m.successful_payment.currency + '] ' + m.successful_payment.invoice_payload));
+      if (m.refunded_payment) box.appendChild(el('div', '', '[refund ' + m.refunded_payment.total_amount + ' ' + m.refunded_payment.currency + '] ' + m.refunded_payment.invoice_payload));
+      // The person's tap on Pay: the stand queues the pre-checkout query.
+      const pay = async () => {
+        await post('/sim/invoice/pay', { chat_id: chatID, user_id: num('user'), username: $('username').value, message_id: m.message_id });
+        refreshChat();
+      };
       if (m.caption) {
         box.appendChild(el('div', '', m.caption));
       }
@@ -221,6 +229,7 @@
             if (b.web_app) btn.title = 'Opens ' + b.web_app.url + ' as a Mini App';
             btn.addEventListener('click', async () => {
               if (b.web_app) { miniApp.open(b.web_app.url); return; }
+              if (b.pay) { await pay(); return; }
               if (b.url) { window.open(b.url, '_blank', 'noopener'); return; }
               if (b.copy_text) { await navigator.clipboard.writeText(b.copy_text.text); return; }
               const inlineQuery = b.switch_inline_query ?? b.switch_inline_query_current_chat;
@@ -232,6 +241,14 @@
           }
           box.appendChild(kb);
         }
+      } else if (m.invoice) {
+        // An invoice without a keyboard shows Telegram's own Pay button.
+        const kb = el('div', 'kb');
+        const btn = el('button', '', 'Pay');
+        btn.type = 'button';
+        btn.addEventListener('click', pay);
+        kb.appendChild(btn);
+        box.appendChild(kb);
       }
       log.appendChild(box);
     }
