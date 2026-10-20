@@ -15,6 +15,7 @@ func TestCommandFeature(t *testing.T) {
 			var c *command
 			var me map[string]any
 			var answer string
+			var webhook string
 			sc.Given(`^the tgfake command is serving with its scripted model$`, func() {
 				c = startCommand(t, "--llm", "--llm-delay", "0s")
 			})
@@ -52,6 +53,23 @@ func TestCommandFeature(t *testing.T) {
 			sc.Then(`^the model answers "([^"]*)"$`, func(want string) error {
 				if answer != want {
 					return fmt.Errorf("the model answered %q, want %q", answer, want)
+				}
+				return nil
+			})
+			sc.Given(`^the tgfake command allows HTTP webhooks for container tests$`, func() {
+				c = startCommand(t, "--allow-http-webhook")
+			})
+			sc.When(`^the bot registers a webhook at "([^"]*)"$`, func(target string) error {
+				webhook = target
+				if body := c.botCall("setWebhook", url.Values{"url": {target}}); body["ok"] != true {
+					return fmt.Errorf("setWebhook answered %v", body)
+				}
+				return nil
+			})
+			sc.Then(`^the webhook registration succeeds$`, func() error {
+				body := c.botCall("getWebhookInfo", nil)
+				if result, _ := body["result"].(map[string]any); result["url"] != webhook {
+					return fmt.Errorf("getWebhookInfo answered %v, want the webhook %s", body, webhook)
 				}
 				return nil
 			})

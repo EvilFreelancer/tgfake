@@ -21,6 +21,7 @@ Flags are parsed by Go's `flag` package, so `-addr` and `--addr` are the same fl
 | `--bot-username` | `tgfake_bot` | The username `getMe` reports and the bot's messages carry. A group message that mentions the bot uses it. |
 | `--bot-name` | `tgfake` | The bot's first name, as `getMe` and the bot's own messages report it. |
 | `--inline` | off | Enable inline query simulation and report `supports_inline_queries=true` in `getMe`, like enabling inline mode through BotFather. |
+| `--allow-http-webhook` | off | Permit non-loopback HTTP webhook URLs on any port for container test networks. Does not relax HTTPS, malformed URL or secret-token validation. |
 | `--poll-max` | `30s` | The longest a `getUpdates` request is held open, whatever `timeout` the bot asks for. A call reaches the outbox when it is answered, so a short value such as `1s` lets a test see an idle bot's polls without waiting 30 seconds. |
 | `--verbose` | off | Print one line per Bot API call to stderr. |
 | `--version` | off | Print the version and exit. |
@@ -84,7 +85,7 @@ In this mode an omitted `--token` becomes `123456:SERVERLESS`; this token authen
 Once the listener is bound the command prints a banner to stdout:
 
 ```text
-tgfake v1.1.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
+tgfake v1.2.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
   Bot API:    http://127.0.0.1:18790/bot<token>/<method>  (in place of https://api.telegram.org)
   chat page:  http://127.0.0.1:18790/
   sim API:    http://127.0.0.1:18790/sim/

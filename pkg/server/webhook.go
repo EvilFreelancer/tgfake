@@ -44,7 +44,7 @@ func (s *Server) setWebhook(w http.ResponseWriter, req *http.Request, method str
 		u, err := url.Parse(rawURL)
 		if err != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") {
 			problem = "Bad Request: invalid webhook URL specified"
-		} else if !webapp.IsLoopbackHost(u.Hostname()) {
+		} else if !webapp.IsLoopbackHost(u.Hostname()) && (!s.opts.AllowHTTPWebhook || u.Scheme != "http") {
 			if u.Scheme != "https" {
 				problem = "Bad Request: bad webhook: An HTTPS URL must be provided for webhook"
 			} else if port := u.Port(); port != "" && port != "443" && port != "80" && port != "88" && port != "8443" {

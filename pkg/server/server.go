@@ -55,6 +55,9 @@ type Options struct {
 	HTTPClient *http.Client
 	// InlineMode is the BotFather inline-mode setting getMe reports.
 	InlineMode bool
+	// AllowHTTPWebhook permits non-loopback HTTP webhook URLs on any port
+	// for container test networks. False preserves Telegram's URL checks.
+	AllowHTTPWebhook bool
 }
 
 // The bot a Server with no options plays.
