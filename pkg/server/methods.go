@@ -55,7 +55,9 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 	case "setmycommands":
 		s.setMyCommands(w, method, params)
 	case "getmycommands":
-		s.writeResult(w, method, params, s.Commands())
+		s.getMyCommands(w, method, params)
+	case "deletemycommands":
+		s.deleteMyCommands(w, method, params)
 	case "sendmessage":
 		s.sendMessage(w, method, params)
 	case "sendphoto":
@@ -92,6 +94,10 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.sendChatAction(w, method, params)
 	case "answercallbackquery":
 		s.answerCallbackQuery(w, method, params)
+	case "sendinvoice":
+		s.sendInvoice(w, method, params)
+	case "answerprecheckoutquery":
+		s.answerPreCheckoutQuery(w, method, params)
 	case "sendrichmessage":
 		s.sendRichMessage(w, method, params)
 	case "sendrichmessagedraft":
@@ -227,18 +233,6 @@ func (s *Server) closed() bool {
 	}
 }
 
-func (s *Server) setMyCommands(w http.ResponseWriter, method string, params url.Values) {
-	var cmds []botapi.BotCommand
-	if err := json.Unmarshal([]byte(params.Get("commands")), &cmds); err != nil {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't parse commands JSON object", 0)
-		return
-	}
-	s.mu.Lock()
-	s.commands = cmds
-	s.mu.Unlock()
-	s.writeResult(w, method, params, true)
-}
-
 func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Values) {
 	chatID, ok := chatIDOf(params)
 	if !ok {
@@ -275,7 +269,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 		ReplyToMessage: quoted,
 	}
 	msg.ReplyMarkup = markup
-	msg.HasProtectedContent = params.Get("protect_content") == "true"
+	msg.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
 	result := stored.clone()
 	s.mu.Unlock()
@@ -293,7 +287,7 @@ func (s *Server) keyboardFor(chatID int64, params url.Values) (*botapi.InlineKey
 	s.mu.Lock()
 	chatType := s.chatTypeLocked(chatID)
 	s.mu.Unlock()
-	if problem := validateKeyboard(markup, chatType); problem != "" {
+	if problem := validateKeyboard(markup, chatType, false); problem != "" {
 		return nil, problem
 	}
 	return markup, ""
@@ -319,6 +313,11 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 		return
 	}
 	newText := target.msg.Text
+	if target.msg.Invoice != nil && strings.EqualFold(method, "editMessageText") {
+		s.mu.Unlock()
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message can't be edited", 0)
+		return
+	}
 	if strings.EqualFold(method, "editMessageText") {
 		if target.file != nil || target.msg.Location != nil || target.msg.Contact != nil {
 			s.mu.Unlock()
@@ -339,7 +338,9 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 	}
 	newMarkup, problem := parseKeyboard(params.Get("reply_markup"))
 	if problem == "" {
-		problem = validateKeyboard(newMarkup, target.msg.Chat.Type)
+		// A Pay button is refused in an edit even of an invoice, as Telegram
+		// refuses it; a keyboard without one, or none, is taken.
+		problem = validateKeyboard(newMarkup, target.msg.Chat.Type, false)
 	}
 	if problem != "" {
 		s.mu.Unlock()
@@ -406,15 +407,12 @@ func (s *Server) sendChatAction(w http.ResponseWriter, method string, params url
 
 func (s *Server) answerCallbackQuery(w http.ResponseWriter, method string, params url.Values) {
 	id := params.Get("callback_query_id")
-	if id == "" {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: callback_query_id is empty", 0)
-		return
-	}
-	answer := CallbackAnswer{ID: id, Text: params.Get("text"), ShowAlert: params.Get("show_alert") == "true"}
+	answer := CallbackAnswer{ID: id, Text: params.Get("text"), ShowAlert: truthy(params.Get("show_alert"))}
 	s.mu.Lock()
 	// The query names no chat; the tap that minted it does. A query the fake
-	// never issued, one minted before a Reset and one already answered are
-	// refused the way Telegram refuses an answer to a query it does not know.
+	// never issued, an empty id, one minted before a Reset and one already
+	// answered are refused the way Telegram refuses an answer to a query it
+	// does not know.
 	chatID, known := s.cbqChat[id]
 	if !known {
 		s.mu.Unlock()
@@ -475,7 +473,7 @@ func (s *Server) sendRichMessage(w http.ResponseWriter, method string, params ur
 		ReplyToMessage: quoted,
 		ReplyMarkup:    markup,
 	}
-	msg.HasProtectedContent = params.Get("protect_content") == "true"
+	msg.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(msg, true, "", true)
 	result := stored.clone()
 	s.mu.Unlock()
@@ -511,8 +509,8 @@ func (s *Server) sendRichMessageDraft(w http.ResponseWriter, method string, para
 	d.updatedAt = now
 	d.revisions++
 	d.threadID = atoi(params.Get("message_thread_id"))
-	d.canStop = params.Get("can_stop") == "true"
-	d.keepOnStop = params.Get("keep_on_stop") == "true"
+	d.canStop = truthy(params.Get("can_stop"))
+	d.keepOnStop = truthy(params.Get("keep_on_stop"))
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)
 }
@@ -554,6 +552,17 @@ func chatIDOf(params url.Values) (int64, bool) {
 	return id, err == nil && id != 0
 }
 
+// truthy reads a Boolean parameter the way the Bot API server does: "true",
+// "yes" or "1" in any case and with surrounding spaces is true, anything else
+// is false. Libraries differ in how they spell true ("true", "True", "1").
+func truthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "1":
+		return true
+	}
+	return false
+}
+
 // messageTextMax is Telegram's limit on the text of one message, in
 // characters: what makes a bot split a long answer, and what a fake that
 // accepted any length would let a streaming path get wrong unnoticed.
@@ -576,7 +585,7 @@ func replyTargetLocked(chat *chatState, params url.Values) (*botapi.Message, str
 		}
 	} else {
 		reply.MessageID = atoi(params.Get("reply_to_message_id"))
-		reply.AllowSendingWithoutReply = params.Get("allow_sending_without_reply") == "true"
+		reply.AllowSendingWithoutReply = truthy(params.Get("allow_sending_without_reply"))
 	}
 	if reply.MessageID == 0 {
 		return nil, ""
@@ -593,7 +602,7 @@ func replyTargetLocked(chat *chatState, params url.Values) (*botapi.Message, str
 
 // inlineKeyboardNotArray is what Telegram answers when reply_markup names
 // inline_keyboard with a value that is not an array.
-const inlineKeyboardNotArray = `Bad Request: Field "inline_keyboard" must be of type Array`
+const inlineKeyboardNotArray = `Bad Request: field "inline_keyboard" must be of type Array`
 
 // parseKeyboard reads reply_markup; a markup of another kind (a reply
 // keyboard, a remove) is not an inline keyboard and reads as none, and so does
@@ -631,26 +640,30 @@ const callbackDataMax = 64
 // invisible until a real chat shows a keyboard that never arrives - and a
 // web_app button outside a private chat or to an address Telegram would not
 // open. It also refuses a button with more than one action, which Telegram
-// would read as its first. It returns the error description, or "" for a
-// keyboard the stand takes in a chat of chatType.
-func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string) string {
+// would read as its first, and a Pay button outside an invoice. payAllowed
+// says the keyboard belongs to an invoice. It returns the error description,
+// or "" for a keyboard the stand takes in a chat of chatType.
+func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string, payAllowed bool) string {
 	if kb == nil {
 		return ""
 	}
 	for _, row := range kb.InlineKeyboard {
 		for _, b := range row {
 			actions := 0
-			for _, set := range []bool{b.CallbackData != "", b.URL != "", b.WebApp != nil, b.SwitchInlineQuery != nil, b.SwitchInlineQueryCurrentChat != nil, b.CopyText != nil} {
+			for _, set := range []bool{b.CallbackData != "", b.URL != "", b.WebApp != nil, b.SwitchInlineQuery != nil, b.SwitchInlineQueryCurrentChat != nil, b.CopyText != nil, b.Pay} {
 				if set {
 					actions++
 				}
 			}
 			switch {
 			case actions == 0:
-				return "Bad Request: Text buttons are not allowed in the inline keyboard"
+				return "Bad Request: can't parse InlineKeyboardButton: Text buttons are not allowed in the inline keyboard"
 			case actions > 1:
 				// Telegram takes the first action in its own order; the
 				// stand refuses the button, so an ambiguous one never passes.
+				return "Bad Request: BUTTON_TYPE_INVALID"
+			}
+			if b.Pay && !payAllowed {
 				return "Bad Request: BUTTON_TYPE_INVALID"
 			}
 			if len(b.CallbackData) > callbackDataMax {

@@ -31,6 +31,8 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | `POST /sim/user/profile` | Configure a user's profile photos. |
 | `POST /sim/callback` | The person taps an inline keyboard button. |
 | `POST /sim/draft/stop` | The person presses Stop under a streamed draft. |
+| `POST /sim/invoice/pay` | The person starts paying an invoice. |
+| `POST /sim/payment` | A payment service message arrives. |
 | `GET /sim/outbox` | Every Bot API call the stand answered, oldest first. |
 | `GET /sim/outbox/count` | How many Bot API calls the stand answered. |
 | `GET /sim/chat/{id}` | The transcript of a chat, as JSON or as text. |
@@ -196,6 +198,64 @@ curl -s -X POST $O/sim/draft/stop -d '{"draft_id": -1}'
 {"update_id":3}
 ```
 
+## POST /sim/invoice/pay
+
+The person starts paying an invoice message. The stand queues a `pre_checkout_query` carrying the currency, the total and the payload of that invoice, provided the bot's `allowed_updates` subscription includes `pre_checkout_query` at that moment ([bot-api.md](bot-api.md#getupdates)). No money moves yet: the charge follows only if the bot confirms with `answerPreCheckoutQuery` ([bot-api.md](bot-api.md#payments)).
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `message_id` | integer | the newest message of the chat carrying an invoice | The invoice being paid. |
+| `chat_id` | integer | `4242` | The chat of the invoice. |
+| `user_id` | integer | `4242` | The person paying. |
+| `username`, `first_name` | string | `alice` / `Alice` | The identity of the person paying. |
+
+A press that finds no invoice is refused with `404` and one of these reasons:
+
+| Error | When |
+|-------|------|
+| `chat <id> has no messages` | The chat does not exist. |
+| `message <id> not found in chat <id>` | `message_id` names a message that is not there, was deleted, or carries no invoice. |
+| `chat <id> has no message with an invoice` | No `message_id` was given and no message of the chat carries an invoice. |
+
+```bash
+curl -s -X POST $O/sim/invoice/pay -d '{"chat_id": 4242}'
+```
+
+```json
+{"update_id":3,"pre_checkout_query_id":"pcq-1"}
+```
+
+## POST /sim/payment
+
+A payment service message arrives without a pre-checkout this stand watched: a charge taken elsewhere, or a charge returned. It is stored in the chat and queued as a `message` update.
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `kind` | string | `successful` | `successful` or `refunded`. |
+| `chat_id` | integer | `4242` | The chat of the invoice. |
+| `user_id`, `username`, `first_name` | string/integer | `4242` / `alice` / `Alice` | The person who paid. |
+| `currency` | string | the newest invoice's, else `XTR` | The currency of the charge. |
+| `total_amount` | integer | the newest invoice's total, else 0 | The charge, in the smallest units of the currency. |
+| `invoice_payload` | string | the newest invoice's payload, else empty | The payload the bot gave `sendInvoice`. |
+| `telegram_payment_charge_id` | string | `charge-N` | The charge id. A refund cannot be delivered without one. |
+| `provider_payment_charge_id` | string | `provider-charge-N` | The provider's charge id. |
+
+A delivery that cannot be made is refused with `400` or `404` and one of these reasons:
+
+| Error | When |
+|-------|------|
+| `kind is successful or refunded` (400) | `kind` is neither of the two. |
+| `telegram_payment_charge_id is required for a refund` (400) | A `refunded` payment arrived with no charge id to return. |
+| `chat <id> has no messages` (404) | The chat does not exist. |
+
+```bash
+curl -s -X POST $O/sim/payment -d '{"chat_id": 4242, "kind": "refunded", "telegram_payment_charge_id": "charge-1"}'
+```
+
+```json
+{"update_id":4,"message_id":2}
+```
+
 ## GET /sim/outbox
 
 Every Bot API call that named a method, refused calls included, oldest first:
@@ -250,7 +310,7 @@ curl -s $O/sim/chat/4242
 | `callbacks` | Every `answerCallbackQuery` for a tap in this chat: `id`, `text`, `show_alert`. |
 | `menu_button` | The menu button the chat shows: its own, else the bot's ([mini-apps.md](mini-apps.md#the-menu-button)). |
 
-A message has `message_id`; `from`, which is `bot` or `user`; `username` for the person's messages; `text`; `caption`; `photo` or `document` with `file_id`, `name`, `mime_type`, `size` and, for a photo, `width` and `height`; `parse_mode` as the bot sent it; `reply_to_message_id`; the flags `edited`, `deleted` and `rich`; and `keyboard`, the rows of inline buttons.
+A message has `message_id`; `from`, which is `bot` or `user`; `username` for the person's messages; `text`; `caption`; `photo` or `document` with `file_id`, `name`, `mime_type`, `size` and, for a photo, `width` and `height`; `parse_mode` as the bot sent it; `reply_to_message_id`; the flags `edited`, `deleted` and `rich`; and `keyboard`, the rows of inline buttons. A message of the payment flow carries `invoice`, `successful_payment` or `refunded_payment`, the shapes of [`pkg/botapi`](../pkg/botapi/types.go).
 
 ### The text format
 
@@ -274,6 +334,7 @@ typing…
 
 - Each message that is not deleted is one line, `[<message_id>] <who>: <text>`, where `<who>` is `bot`, the person's username, or `user` for a person with none.
 - A photo is shown as `[photo <file name> <width>x<height>]` and a document as `[document <file name>]`, each followed by its caption when it has one.
+- An invoice is shown as `[invoice <title> <total> <currency>] <description>`, a payment as `[payment <total> <currency>] <payload>` and a refund as `[refund <total> <currency>] <payload>`, the total in the smallest units of the currency.
 - The lines after the first of a multi-line text or caption are indented by four spaces.
 - Each row of a message's inline keyboard follows it on a line of its own: four spaces, then `[<button text>]` for each button, separated by spaces.
 - After the messages comes one line per live draft, `draft <draft_id> (rev <revisions>): <markdown>`, followed by a line `    [Stop]` when the draft shows a Stop button.
@@ -300,7 +361,7 @@ The chats the stand knows, by chat id. `title` is `@<username>` of the person fo
 A summary of the stand:
 
 ```json
-{"allowed_updates":null,"bot":{"can_join_groups":true,"can_read_all_group_messages":false,"first_name":"tgfake","id":7000000001,"is_bot":true,"supports_inline_queries":false,"username":"tgfake_bot"},"calls":3,"commands":[],"faults":[],"menu_button":{"type":"commands"},"next_update_id":2,"pending_updates":0}
+{"allowed_updates":null,"bot":{"can_join_groups":true,"can_read_all_group_messages":false,"first_name":"tgfake","id":7000000001,"is_bot":true,"supports_inline_queries":false,"username":"tgfake_bot"},"calls":3,"command_lists":[],"commands":[],"faults":[],"menu_button":{"type":"commands"},"next_update_id":2,"pending_updates":0}
 ```
 
 | Field | Meaning |
@@ -309,7 +370,8 @@ A summary of the stand:
 | `pending_updates` | Updates queued and not yet confirmed by a poll's `offset`. |
 | `next_update_id` | The id the next update will get. |
 | `allowed_updates` | The subscription in force; `null` means every kind. |
-| `commands` | What the bot last set with `setMyCommands`, `[]` before that. |
+| `commands` | The default-scope list with no language, `[]` before any `setMyCommands`. |
+| `command_lists` | Every list the bot registered, as `{scope, language_code, commands}`, ordered by scope then language. |
 | `menu_button` | The bot's own menu button. |
 | `faults` | The faults still scheduled. |
 | `calls` | The number of calls in the outbox. |
@@ -401,8 +463,9 @@ Starts a new session without restarting the command. It answers `{"ok":true}` an
 - the chats, with their messages, drafts, callback answers and typing state;
 - the outbox, whose `seq` starts again at 1;
 - the faults;
-- the commands set with `setMyCommands`;
+- the commands set with `setMyCommands`, every scope and language included;
 - the callback queries (an answer to a query minted before the reset is refused, and numbering starts again at `cbq-1`);
+- the pre-checkout queries (an answer to a query minted before the reset is refused; their numbering goes on, so a new query never takes an old id);
 - the uploaded files (numbering starts again at `file_1`);
 - the menu buttons, the bot's and the chats'.
 - configured chat members/metadata, profile photos, inline queries/results, inline edit targets, prepared messages and issued Mini App query ids.

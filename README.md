@@ -11,10 +11,11 @@ purpose. No token, no phone, no network.
 - **A real Bot API surface.** `getMe`, long-polled `getUpdates` with
   `offset` and `allowed_updates`, `sendMessage`, `editMessageText`,
   `answerCallbackQuery`, file downloads, photos/video/audio/voice and albums,
-  copy/forward operations, inline results, webhooks, chat information, bot commands,
-  the menu button, and the Bot API 10.1 rich messages and drafts with the
-  10.3 Stop button. Forms, JSON and multipart are all accepted, so any Bot
-  API library works unchanged.
+  copy/forward operations, inline results, webhooks, chat information, bot
+  commands per scope and language, invoices with the pre-checkout query and
+  the payment service message, the menu button, and the Bot API 10.1 rich
+  messages and drafts with the 10.3 Stop button. Forms, JSON and multipart
+  are all accepted, so any Bot API library works unchanged.
 - **Strict where Telegram is strict.** An edit that changes nothing, a reply
   to a message that is not there, an answer to an unknown callback query, a
   second answer to the same one, `callback_data` over 64 bytes, a `null`

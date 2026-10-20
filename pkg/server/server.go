@@ -101,22 +101,27 @@ type storedFile struct {
 type Server struct {
 	opts Options
 
-	mu         sync.Mutex
-	nextUpdate int
-	pending    []botapi.Update
-	allowed    []string // update kinds delivered; nil = every kind
-	wake       chan struct{}
-	closing    chan struct{}
-	closeOnce  sync.Once
-	chats      map[int64]*chatState
-	calls      []Call
-	faults     map[string]*Fault
-	commands   []botapi.BotCommand
-	nextCbq    int
-	cbqChat    map[string]int64 // callback query id → chat the tap came from
-	files      map[string]*storedFile
-	nextFileID int
-	now        func() time.Time
+	mu           sync.Mutex
+	nextUpdate   int
+	pending      []botapi.Update
+	allowed      []string // update kinds delivered; nil = every kind
+	wake         chan struct{}
+	closing      chan struct{}
+	closeOnce    sync.Once
+	chats        map[int64]*chatState
+	calls        []Call
+	faults       map[string]*Fault
+	commandLists map[commandKey][]botapi.BotCommand
+	nextCbq      int
+	cbqChat      map[string]int64 // callback query id → chat the tap came from
+	// preCheckouts holds the pre_checkout_query calls issued and not yet
+	// answered. A query takes exactly one answer, as a callback query does.
+	preCheckouts    map[string]*preCheckout
+	nextPreCheckout int
+	nextCharge      int // numbers the charge ids of payment service messages
+	files           map[string]*storedFile
+	nextFileID      int
+	now             func() time.Time
 
 	// token is the one in the path of the latest Bot API call: what launch
 	// data is signed with when Options.Token is not set.
@@ -163,6 +168,7 @@ func New(opts Options) *Server {
 		chats:          map[int64]*chatState{},
 		faults:         map[string]*Fault{},
 		cbqChat:        map[string]int64{},
+		preCheckouts:   map[string]*preCheckout{},
 		files:          map[string]*storedFile{},
 		now:            time.Now,
 		chatMenus:      map[int64]*botapi.MenuButton{},
@@ -219,9 +225,13 @@ func (s *Server) Reset() {
 	s.chats = map[int64]*chatState{}
 	s.calls = nil
 	s.faults = map[string]*Fault{}
-	s.commands = nil
+	s.commandLists = map[commandKey][]botapi.BotCommand{}
 	s.nextCbq = 0
 	s.cbqChat = map[string]int64{}
+	// Pre-checkout ids keep growing: an answer to a query minted before the
+	// reset must not reach the query minted after it under the same id.
+	s.preCheckouts = map[string]*preCheckout{}
+	s.nextCharge = 0
 	s.files = map[string]*storedFile{}
 	s.nextFileID = 0
 	s.defaultMenu = nil
@@ -294,15 +304,6 @@ func (s *Server) WaitCall(method string, n int, timeout time.Duration) bool {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-// Commands returns what the bot last registered with setMyCommands.
-func (s *Server) Commands() []botapi.BotCommand {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Never nil: a bot with no commands has an empty list, which getMyCommands
-	// answers as [] the way Telegram does.
-	return append([]botapi.BotCommand{}, s.commands...)
 }
 
 // record appends a call to the outbox. Caller holds s.mu.

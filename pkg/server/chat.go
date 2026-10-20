@@ -36,6 +36,10 @@ type storedMessage struct {
 	deleted   bool
 	rich      bool
 	file      *storedFile // the upload a photo or document message carries
+	// invoicePayload is the payload the bot gave sendInvoice. It is not part
+	// of the wire Invoice object; the pre-checkout query and the payment
+	// service message carry it back to the bot.
+	invoicePayload string
 }
 
 type draft struct {
@@ -114,6 +118,7 @@ func (m *storedMessage) clone() *botapi.Message {
 	out.Video, out.Animation, out.Audio, out.Voice, out.VideoNote = copyPointer(m.msg.Video), copyPointer(m.msg.Animation), copyPointer(m.msg.Audio), copyPointer(m.msg.Voice), copyPointer(m.msg.VideoNote)
 	out.Location, out.Contact, out.Venue, out.WebAppData = copyPointer(m.msg.Location), copyPointer(m.msg.Contact), copyPointer(m.msg.Venue), copyPointer(m.msg.WebAppData)
 	out.ViaBot = copyPointer(m.msg.ViaBot)
+	out.Invoice, out.SuccessfulPayment, out.RefundedPayment = copyPointer(m.msg.Invoice), copyPointer(m.msg.SuccessfulPayment), copyPointer(m.msg.RefundedPayment)
 	out.ForwardOrigin = copyPointer(m.msg.ForwardOrigin)
 	if out.ForwardOrigin != nil {
 		out.ForwardOrigin.SenderUser = copyPointer(out.ForwardOrigin.SenderUser)
@@ -220,30 +225,33 @@ func (v ChatView) FindButton(label string) (messageID int, data string, ok bool)
 
 // MessageView is one message of a ChatView.
 type MessageView struct {
-	MessageID        int                             `json:"message_id"`
-	From             string                          `json:"from"` // "bot" or "user"
-	Username         string                          `json:"username,omitempty"`
-	Text             string                          `json:"text"`
-	Caption          string                          `json:"caption,omitempty"`
-	Photo            *FileView                       `json:"photo,omitempty"`
-	Document         *FileView                       `json:"document,omitempty"`
-	Video            *FileView                       `json:"video,omitempty"`
-	Audio            *FileView                       `json:"audio,omitempty"`
-	Voice            *FileView                       `json:"voice,omitempty"`
-	Animation        *FileView                       `json:"animation,omitempty"`
-	VideoNote        *FileView                       `json:"video_note,omitempty"`
-	Location         *botapi.Location                `json:"location,omitempty"`
-	Venue            *botapi.Venue                   `json:"venue,omitempty"`
-	Contact          *botapi.Contact                 `json:"contact,omitempty"`
-	WebAppData       *botapi.WebAppData              `json:"web_app_data,omitempty"`
-	MediaGroupID     string                          `json:"media_group_id,omitempty"`
-	ForwardOrigin    *botapi.MessageOrigin           `json:"forward_origin,omitempty"`
-	ParseMode        string                          `json:"parse_mode,omitempty"`
-	ReplyToMessageID int                             `json:"reply_to_message_id,omitempty"`
-	Edited           bool                            `json:"edited"`
-	Deleted          bool                            `json:"deleted"`
-	Rich             bool                            `json:"rich"`
-	Keyboard         [][]botapi.InlineKeyboardButton `json:"keyboard,omitempty"`
+	MessageID         int                             `json:"message_id"`
+	From              string                          `json:"from"` // "bot" or "user"
+	Username          string                          `json:"username,omitempty"`
+	Text              string                          `json:"text"`
+	Caption           string                          `json:"caption,omitempty"`
+	Photo             *FileView                       `json:"photo,omitempty"`
+	Document          *FileView                       `json:"document,omitempty"`
+	Video             *FileView                       `json:"video,omitempty"`
+	Audio             *FileView                       `json:"audio,omitempty"`
+	Voice             *FileView                       `json:"voice,omitempty"`
+	Animation         *FileView                       `json:"animation,omitempty"`
+	VideoNote         *FileView                       `json:"video_note,omitempty"`
+	Location          *botapi.Location                `json:"location,omitempty"`
+	Venue             *botapi.Venue                   `json:"venue,omitempty"`
+	Contact           *botapi.Contact                 `json:"contact,omitempty"`
+	WebAppData        *botapi.WebAppData              `json:"web_app_data,omitempty"`
+	Invoice           *botapi.Invoice                 `json:"invoice,omitempty"`
+	SuccessfulPayment *botapi.SuccessfulPayment       `json:"successful_payment,omitempty"`
+	RefundedPayment   *botapi.RefundedPayment         `json:"refunded_payment,omitempty"`
+	MediaGroupID      string                          `json:"media_group_id,omitempty"`
+	ForwardOrigin     *botapi.MessageOrigin           `json:"forward_origin,omitempty"`
+	ParseMode         string                          `json:"parse_mode,omitempty"`
+	ReplyToMessageID  int                             `json:"reply_to_message_id,omitempty"`
+	Edited            bool                            `json:"edited"`
+	Deleted           bool                            `json:"deleted"`
+	Rich              bool                            `json:"rich"`
+	Keyboard          [][]botapi.InlineKeyboardButton `json:"keyboard,omitempty"`
 }
 
 // FileView is the photo or document of a MessageView.
@@ -324,6 +332,7 @@ func (c *chatState) view(now time.Time) ChatView {
 		}
 		wire := m.clone()
 		mv.Location, mv.Contact, mv.Venue, mv.WebAppData, mv.MediaGroupID, mv.ForwardOrigin = wire.Location, wire.Contact, wire.Venue, wire.WebAppData, wire.MediaGroupID, wire.ForwardOrigin
+		mv.Invoice, mv.SuccessfulPayment, mv.RefundedPayment = wire.Invoice, wire.SuccessfulPayment, wire.RefundedPayment
 		if m.fromBot {
 			mv.From = "bot"
 		} else if m.msg.From != nil {
@@ -445,6 +454,12 @@ func (v ChatView) Text() string {
 			sb.WriteString("[contact " + m.Contact.FirstName + "] " + m.Contact.PhoneNumber)
 		case m.WebAppData != nil:
 			sb.WriteString("[web_app_data " + m.WebAppData.ButtonText + "] " + m.WebAppData.Data)
+		case m.SuccessfulPayment != nil:
+			sb.WriteString("[payment " + itoa(int(m.SuccessfulPayment.TotalAmount)) + " " + m.SuccessfulPayment.Currency + "] " + m.SuccessfulPayment.InvoicePayload)
+		case m.RefundedPayment != nil:
+			sb.WriteString("[refund " + itoa(int(m.RefundedPayment.TotalAmount)) + " " + m.RefundedPayment.Currency + "] " + m.RefundedPayment.InvoicePayload)
+		case m.Invoice != nil:
+			sb.WriteString("[invoice " + m.Invoice.Title + " " + itoa(int(m.Invoice.TotalAmount)) + " " + m.Invoice.Currency + "] " + m.Invoice.Description)
 		case m.Photo != nil:
 			sb.WriteString("[photo " + m.Photo.Name + " " + itoa(m.Photo.Width) + "x" + itoa(m.Photo.Height) + "]")
 			if m.Caption != "" {

@@ -205,13 +205,8 @@ func (s *Server) chatInformation(w http.ResponseWriter, method string, params ur
 		}
 	} else {
 		id, ok := chatIDOf(params)
-		if !ok && strings.HasPrefix(params.Get("chat_id"), "@") {
-			for _, chat := range s.chats {
-				if chat.typ != "private" && strings.EqualFold(stringOf(chat.info["username"]), strings.TrimPrefix(params.Get("chat_id"), "@")) {
-					id, ok = chat.id, true
-					break
-				}
-			}
+		if !ok {
+			id, ok = s.chatByUsernameLocked(params.Get("chat_id"))
 		}
 		chat := s.chats[id]
 		if !ok || chat == nil {
@@ -287,4 +282,18 @@ func (s *Server) simConfigureChat(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// chatByUsernameLocked resolves an @username to a configured group or
+// channel, the chats Telegram finds by a public username. Caller holds s.mu.
+func (s *Server) chatByUsernameLocked(ref string) (int64, bool) {
+	if !strings.HasPrefix(ref, "@") {
+		return 0, false
+	}
+	for _, chat := range s.chats {
+		if chat.typ != "private" && strings.EqualFold(stringOf(chat.info["username"]), strings.TrimPrefix(ref, "@")) {
+			return chat.id, true
+		}
+	}
+	return 0, false
 }

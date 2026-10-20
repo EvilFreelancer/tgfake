@@ -15,6 +15,8 @@ import (
 //	POST /sim/message           {chat_id, chat_type, user_id, username, text, reply_to_message_id, mention}
 //	POST /sim/callback          {chat_id, user_id, message_id, data} or {chat_id, label}
 //	POST /sim/draft/stop        {chat_id, draft_id}
+//	POST /sim/invoice/pay       {chat_id, message_id, user_id, username, first_name}
+//	POST /sim/payment           {chat_id, user_id, kind, currency, total_amount, invoice_payload, ...}
 //	GET  /sim/outbox?method=&since=
 //	GET  /sim/outbox/count?method=
 //	GET  /sim/chat/{id}?format=text
@@ -30,6 +32,8 @@ func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sim/message", s.simMessage)
 	mux.HandleFunc("POST /sim/callback", s.simCallback)
 	mux.HandleFunc("POST /sim/draft/stop", s.simDraftStop)
+	mux.HandleFunc("POST /sim/invoice/pay", s.simInvoicePay)
+	mux.HandleFunc("POST /sim/payment", s.simPayment)
 	mux.HandleFunc("GET /sim/outbox", s.simOutbox)
 	mux.HandleFunc("GET /sim/outbox/count", s.simOutboxCount)
 	mux.HandleFunc("GET /sim/chat/{id}", s.simChat)
@@ -94,6 +98,41 @@ func (s *Server) simDraftStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"update_id": upd})
 }
 
+// simInvoicePay is the person's tap on the Pay button of an invoice. It
+// queues the pre_checkout_query Telegram sends before it takes any money; the
+// charge itself follows only if the bot confirms with answerPreCheckoutQuery.
+func (s *Server) simInvoicePay(w http.ResponseWriter, r *http.Request) {
+	var in InvoicePay
+	if !readJSON(w, r, &in) {
+		return
+	}
+	upd, id, err := s.PayInvoice(in)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"update_id": upd, "pre_checkout_query_id": id})
+}
+
+// simPayment delivers a payment service message of its own: a charge taken
+// outside a pre-checkout this stand watched, or a charge returned.
+func (s *Server) simPayment(w http.ResponseWriter, r *http.Request) {
+	var in IncomingPayment
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if problem := in.problem(); problem != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": problem})
+		return
+	}
+	upd, id, err := s.InjectPayment(in)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"update_id": upd, "message_id": id})
+}
+
 func (s *Server) simOutbox(w http.ResponseWriter, r *http.Request) {
 	since := atoi(r.URL.Query().Get("since"))
 	calls := s.Calls(r.URL.Query().Get("method"))
@@ -154,6 +193,7 @@ func (s *Server) simState(w http.ResponseWriter, _ *http.Request) {
 		"next_update_id":  next,
 		"allowed_updates": s.AllowedUpdates(),
 		"commands":        s.Commands(),
+		"command_lists":   s.CommandLists(),
 		"menu_button":     s.MenuButton(0),
 		"faults":          s.Faults(),
 		"calls":           len(s.Calls("")),

@@ -109,7 +109,7 @@ func (s *Server) resolveMedia(req *http.Request, params url.Values, kind, field 
 		}
 		u, err := url.Parse(reference)
 		if err != nil || u.Host == "" {
-			return nil, "Bad Request: Wrong HTTP URL specified"
+			return nil, "Bad Request: wrong HTTP URL specified"
 		}
 		fetchCtx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -117,11 +117,11 @@ func (s *Server) resolveMedia(req *http.Request, params url.Values, kind, field 
 		defer stop()
 		fetch, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, reference, nil)
 		if err != nil {
-			return nil, "Bad Request: Wrong HTTP URL specified"
+			return nil, "Bad Request: wrong HTTP URL specified"
 		}
 		response, err := s.opts.HTTPClient.Do(fetch)
 		if err != nil {
-			return nil, "Bad Request: Failed to get HTTP URL content"
+			return nil, "Bad Request: failed to get HTTP URL content"
 		}
 		if kind == "photo" {
 			limit = 5 << 20
@@ -131,7 +131,7 @@ func (s *Server) resolveMedia(req *http.Request, params url.Values, kind, field 
 		data, err = io.ReadAll(io.LimitReader(response.Body, limit+1))
 		_ = response.Body.Close()
 		if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
-			return nil, "Bad Request: Failed to get HTTP URL content"
+			return nil, "Bad Request: failed to get HTTP URL content"
 		}
 		name = path.Base(u.Path)
 		if name == "." || name == "/" {
@@ -232,7 +232,7 @@ func (s *Server) sendMedia(w http.ResponseWriter, req *http.Request, method stri
 		params.Set(kind, fmt.Sprintf("%s (%d bytes)", f.name, len(f.data)))
 	}
 	f = s.keepFileLocked(f)
-	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: params.Get("caption"), ReplyToMessage: quoted, ReplyMarkup: markup, HasProtectedContent: params.Get("protect_content") == "true"}
+	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: params.Get("caption"), ReplyToMessage: quoted, ReplyMarkup: markup, HasProtectedContent: truthy(params.Get("protect_content"))}
 	if kind == "video_note" {
 		msg.Caption = ""
 	}
@@ -347,7 +347,7 @@ func (s *Server) sendMediaGroup(w http.ResponseWriter, req *http.Request, method
 	result := make([]*botapi.Message, 0, len(items))
 	for i, item := range items {
 		f := s.keepFileLocked(files[i])
-		msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: item.Caption, ReplyToMessage: quoted, MediaGroupID: groupID, HasProtectedContent: params.Get("protect_content") == "true"}
+		msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: item.Caption, ReplyToMessage: quoted, MediaGroupID: groupID, HasProtectedContent: truthy(params.Get("protect_content"))}
 		attachFile(msg, f, item.params())
 		stored := chat.appendLocked(msg, true, item.ParseMode, false)
 		stored.file = f
@@ -399,7 +399,7 @@ func (s *Server) editMedia(w http.ResponseWriter, req *http.Request, method stri
 	}
 	markup, problem := parseKeyboard(params.Get("reply_markup"))
 	if problem == "" {
-		problem = validateKeyboard(markup, target.msg.Chat.Type)
+		problem = validateKeyboard(markup, target.msg.Chat.Type, false)
 	}
 	if target.file == nil && replacement == nil && problem == "" {
 		problem = "Bad Request: there is no caption in the message to edit"
@@ -407,7 +407,7 @@ func (s *Server) editMedia(w http.ResponseWriter, req *http.Request, method stri
 	if problem == "" && replacement != nil && target.msg.MediaGroupID != "" {
 		oldKind := target.file.kind
 		if (oldKind == "audio" || oldKind == "document" || replacement.kind == "audio" || replacement.kind == "document") && replacement.kind != oldKind {
-			problem = "Bad Request: Can't use the media of the specified type in the album"
+			problem = "Bad Request: can't use the media of the specified type in the album"
 		}
 	}
 	if problem != "" {

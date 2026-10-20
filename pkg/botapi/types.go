@@ -42,6 +42,9 @@ type InlineKeyboardButton struct {
 	SwitchInlineQuery            *string         `json:"switch_inline_query,omitempty"`
 	SwitchInlineQueryCurrentChat *string         `json:"switch_inline_query_current_chat,omitempty"`
 	CopyText                     *CopyTextButton `json:"copy_text,omitempty"`
+	// Pay is the "Pay" button of an invoice keyboard; Telegram allows it
+	// there only, and the first button of an invoice keyboard must be one.
+	Pay bool `json:"pay,omitempty"`
 }
 
 // CopyTextButton copies text to the clipboard.
@@ -205,6 +208,56 @@ type UserProfilePhotos struct {
 	Photos     [][]PhotoSize `json:"photos"`
 }
 
+// LabeledPrice is one component of an invoice's final price. Amount is in the
+// smallest units of the currency, an integer as Telegram reads it.
+type LabeledPrice struct {
+	Label  string `json:"label"`
+	Amount int64  `json:"amount"`
+}
+
+// Invoice is the invoice a message carries. TotalAmount is the sum of the
+// prices the bot sent it with.
+type Invoice struct {
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	StartParameter string `json:"start_parameter"`
+	Currency       string `json:"currency"`
+	TotalAmount    int64  `json:"total_amount"`
+}
+
+// SuccessfulPayment is the charge a service message reports as taken.
+type SuccessfulPayment struct {
+	Currency                   string `json:"currency"`
+	TotalAmount                int64  `json:"total_amount"`
+	InvoicePayload             string `json:"invoice_payload"`
+	SubscriptionExpirationDate int64  `json:"subscription_expiration_date,omitempty"`
+	IsRecurring                bool   `json:"is_recurring,omitempty"`
+	IsFirstRecurring           bool   `json:"is_first_recurring,omitempty"`
+	ShippingOptionID           string `json:"shipping_option_id,omitempty"`
+	TelegramPaymentChargeID    string `json:"telegram_payment_charge_id"`
+	ProviderPaymentChargeID    string `json:"provider_payment_charge_id"`
+}
+
+// RefundedPayment is the charge a service message reports as returned.
+type RefundedPayment struct {
+	Currency                string `json:"currency"`
+	TotalAmount             int64  `json:"total_amount"`
+	InvoicePayload          string `json:"invoice_payload"`
+	TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
+	ProviderPaymentChargeID string `json:"provider_payment_charge_id,omitempty"`
+}
+
+// PreCheckoutQuery is what the person's tap on Pay delivers to the bot before
+// the charge is taken. The bot answers it with answerPreCheckoutQuery.
+type PreCheckoutQuery struct {
+	ID               string `json:"id"`
+	From             User   `json:"from"`
+	Currency         string `json:"currency"`
+	TotalAmount      int64  `json:"total_amount"`
+	InvoicePayload   string `json:"invoice_payload"`
+	ShippingOptionID string `json:"shipping_option_id,omitempty"`
+}
+
 // MessageOrigin describes the original sender of a forwarded message.
 type MessageOrigin struct {
 	Type       string `json:"type"`
@@ -236,6 +289,9 @@ type Message struct {
 	Contact             *Contact              `json:"contact,omitempty"`
 	Venue               *Venue                `json:"venue,omitempty"`
 	WebAppData          *WebAppData           `json:"web_app_data,omitempty"`
+	Invoice             *Invoice              `json:"invoice,omitempty"`
+	SuccessfulPayment   *SuccessfulPayment    `json:"successful_payment,omitempty"`
+	RefundedPayment     *RefundedPayment      `json:"refunded_payment,omitempty"`
 	MediaGroupID        string                `json:"media_group_id,omitempty"`
 	ForwardOrigin       *MessageOrigin        `json:"forward_origin,omitempty"`
 	ViaBot              *User                 `json:"via_bot,omitempty"`
@@ -265,11 +321,13 @@ type MessageGenerationStopped struct {
 }
 
 // Update is one item of a getUpdates answer. The fake produces messages,
-// callback/inline queries, inline choices and stopped drafts.
+// callback/inline queries, pre-checkout queries, inline choices and stopped
+// drafts.
 type Update struct {
 	UpdateID                 int                       `json:"update_id"`
 	Message                  *Message                  `json:"message,omitempty"`
 	CallbackQuery            *CallbackQuery            `json:"callback_query,omitempty"`
+	PreCheckoutQuery         *PreCheckoutQuery         `json:"pre_checkout_query,omitempty"`
 	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation,omitempty"`
 	InlineQuery              *InlineQuery              `json:"inline_query,omitempty"`
 	ChosenInlineResult       *ChosenInlineResult       `json:"chosen_inline_result,omitempty"`
@@ -279,4 +337,18 @@ type Update struct {
 type BotCommand struct {
 	Command     string `json:"command"`
 	Description string `json:"description"`
+	// IsEphemeral marks a command that answers with an ephemeral message. The
+	// stand keeps the flag; it does not make a message ephemeral.
+	IsEphemeral bool `json:"is_ephemeral,omitempty"`
+}
+
+// BotCommandScope is the audience one list of commands is for. Type is
+// "default", "all_private_chats", "all_group_chats", "all_chat_administrators",
+// "chat", "chat_administrators" or "chat_member"; ChatID and UserID fill in
+// the scopes that name a chat or a person. A scope with no Type is the default
+// one.
+type BotCommandScope struct {
+	Type   string `json:"type"`
+	ChatID int64  `json:"chat_id,omitempty"`
+	UserID int64  `json:"user_id,omitempty"`
 }

@@ -114,7 +114,7 @@ func (s *Server) setWebhook(w http.ResponseWriter, req *http.Request, method str
 	if changeAllowed {
 		s.allowed = append([]string(nil), allowed...)
 	}
-	if params.Get("drop_pending_updates") == "true" {
+	if truthy(params.Get("drop_pending_updates")) {
 		s.pending = nil
 	}
 	s.wakeLocked()

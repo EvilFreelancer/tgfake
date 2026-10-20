@@ -21,10 +21,10 @@ Parameters are read the way the Bot API reads them, so any library works unchang
 | Request | What is read |
 |---------|--------------|
 | `Content-Type: multipart/form-data` | The query string, form fields and file parts, including nested `attach://` references. |
-| `Content-Type: application/json` | The query string and the top-level keys of a JSON object (up to 4 MB). A string value is taken as is; any other value (a number, a boolean, an object, an array, `null`) is kept as its JSON text, so `"reply_markup": {...}` and `"reply_markup": "{...}"` mean the same. |
+| `Content-Type: application/json` | The query string and the top-level keys of a JSON object (up to 4 MB). A string value is taken as is, `null` is an empty value, and any other value (a number, a boolean, an object, an array) is kept as its JSON text, so `"reply_markup": {...}` and `"reply_markup": "{...}"` mean the same. |
 | anything else | The query string and an `application/x-www-form-urlencoded` body. |
 
-A parameter whose value is a Bot API object (`reply_markup`, `reply_parameters`, `allowed_updates`, `commands`, `menu_button`, `rich_message`) is JSON text, as on Telegram. A parameter the stand does not read is accepted, recorded in the outbox with the call, and has no other effect.
+A parameter whose value is a Bot API object (`reply_markup`, `reply_parameters`, `allowed_updates`, `commands`, `scope`, `menu_button`, `rich_message`, `prices`) is JSON text, as on Telegram. A Boolean parameter (`ok`, `show_alert`, `protect_content`, `can_stop`, ...) is true when it reads `true`, `yes` or `1` in any case, as the Bot API server reads it, and false otherwise. A parameter the stand does not read is accepted, recorded in the outbox with the call, and has no other effect.
 
 Send and edit methods require a non-zero integer `chat_id`. Chat information methods also resolve a configured `@channelusername`. Inline edits take `inline_message_id` instead of `chat_id` and `message_id`.
 
@@ -50,8 +50,9 @@ A call is checked in this order: the token (401), then a fault scheduled through
 |--------|-------|---------|
 | `getMe` | nothing | The bot's `User`: `id` 7000000001, `is_bot`, `first_name` (`--bot-name`), `username` (`--bot-username`), `can_join_groups` true, `can_read_all_group_messages` false, `supports_inline_queries` from `--inline` (false by default). |
 | `getUpdates` | `offset`, `limit`, `timeout`, `allowed_updates` | An array of `Update`; see [getUpdates](#getupdates). |
-| `setMyCommands` | `commands` | `true`. One list is kept; `scope` and `language_code` are not read. |
-| `getMyCommands` | nothing | The list last set, `[]` before any `setMyCommands`. |
+| `setMyCommands` | `commands`, `scope`, `language_code` | `true`. One list per scope and per language; see [Commands](#commands). |
+| `getMyCommands` | `scope`, `language_code` | The list registered for exactly that scope and language, `[]` when there is none. |
+| `deleteMyCommands` | `scope`, `language_code` | `true`. Forgets that one list; a wider one shows through again. |
 | `sendMessage` | `chat_id`, `text`, `parse_mode`, `reply_markup`, `reply_parameters` or `reply_to_message_id` and `allow_sending_without_reply` | The sent `Message`. |
 | `getFile` | `file_id` | A `File` with `file_path`, downloadable from `/file/bot<token>/<file_path>`. |
 | `sendPhoto` | `chat_id`, `photo` (upload, known file id or URL), `caption`, `parse_mode`, `reply_markup`, reply parameters, `protect_content` | The sent `Message` with one `PhotoSize`. |
@@ -76,6 +77,8 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `deleteMessages` | `chat_id`, `message_ids` array | `true`; missing messages in a known chat are skipped. |
 | `sendChatAction` | `chat_id` (`action` is recorded, not read) | `true`. The chat shows "typing…" for 5 seconds. |
 | `answerCallbackQuery` | `callback_query_id`, `text`, `show_alert` | `true`. The answer is kept in the chat's `callbacks`. |
+| `sendInvoice` | `chat_id`, `title`, `description`, `payload`, `provider_token`, `currency`, `prices`, `start_parameter`, `reply_markup`, the reply and protection parameters | The sent `Message` with an `Invoice`; its `total_amount` is the sum of the prices. |
+| `answerPreCheckoutQuery` | `pre_checkout_query_id`, `ok`, `error_message` | `true`. Confirming one delivers the `successful_payment` service message. |
 | `sendRichMessage` | `chat_id`, `rich_message` (`{"markdown": ...}` or `{"html": ...}`), `reply_markup`, the reply parameters | The sent `Message`; its `text` is the markdown, else the HTML. |
 | `sendRichMessageDraft` | `chat_id`, `draft_id`, `rich_message`, `can_stop`, `keep_on_stop`, `message_thread_id` | `true`. |
 | `setChatMenuButton` | `chat_id` (optional), `menu_button` | `true`; see [mini-apps.md](mini-apps.md#the-menu-button). |
@@ -96,7 +99,7 @@ Messages, updates, keyboards and the other objects have the shapes of the types 
 
 ## getUpdates
 
-The stand creates `message` (text, incoming media or `web_app_data`), `callback_query`, `inline_query`, `chosen_inline_result` and `stopped_message_generation` updates through the [simulation API](sim-api.md). Update ids start at 1 and grow by one for every update created; they are never reused, not even after `POST /sim/reset`, because a polling bot remembers the last id it confirmed and would drop anything numbered below it. Polling while a webhook is active returns HTTP 409; delete the webhook first.
+The stand creates `message` (text, incoming media, `web_app_data` or a payment service message), `callback_query`, `pre_checkout_query`, `inline_query`, `chosen_inline_result` and `stopped_message_generation` updates through the [simulation API](sim-api.md). Update ids start at 1 and grow by one for every update created; they are never reused, not even after `POST /sim/reset`, because a polling bot remembers the last id it confirmed and would drop anything numbered below it. Polling while a webhook is active returns HTTP 409; delete the webhook first.
 
 | Parameter | Behaviour |
 |-----------|-----------|
@@ -117,7 +120,7 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Replies.** A send replies to a message named by `reply_parameters` (`{"message_id": N, "allow_sending_without_reply": true}`) or by the older `reply_to_message_id` with `allow_sending_without_reply=true`. The answer carries `reply_to_message`, the quoted message without its own quote. A reply to a message that is not in the chat, or was deleted, is refused unless `allow_sending_without_reply` is set, in which case the message goes out unthreaded.
 
-**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat` or `copy_text`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md).
+**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat`, `copy_text` or `pay`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md). A `pay` button is the "Pay" button of an invoice: an invoice is sent with a keyboard that leads with one (`Bad Request: REPLY_MARKUP_BUY_EMPTY` when it has none, `Bad Request: BUTTON_POS_INVALID` when it has one elsewhere), while any other message, and any edit of a keyboard, an invoice's included, refuses one with `Bad Request: BUTTON_TYPE_INVALID`.
 
 **Edits.** The bot's own messages and messages sent via this bot can be edited. `editMessageText` replaces text and keyboard (omitted `reply_markup` removes it) and records `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. Caption/media edits use the same target and keyboard rules. An unchanged edit is refused. Keyboard equality includes every supported button action. Inline targets return `true`; ordinary targets return the edited message.
 
@@ -139,6 +142,22 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Typing.** `sendChatAction` makes the chat show "typing…" for 5 seconds (`typingWindow`), whatever the `action`.
 
+## Commands
+
+`setMyCommands` keeps one list per `scope` and per `language_code`, as Telegram keeps them, each command trimmed and without a leading `/`; no `commands` at all, or `null`, is an empty list. `getMyCommands` answers the list registered for exactly the scope and the language it names, `[]` when there is none ("If commands aren't set, an empty list is returned"), and `deleteMyCommands` forgets exactly that list so a wider one shows through again.
+
+What a user sees in the menu is another list: the one the chain the Bot API documents under "Determining list of commands" reaches first, walked from the user's scope downwards. The stand resolves it in [`Server.CommandsFor`](go.md#reading-what-the-bot-did). From `chat` in a private chat the chain is `chat` with the language, `chat`, `all_private_chats` with the language, `all_private_chats`, `default` with the language, `default`. From `chat_member` in a group it is `chat_member`, `chat_administrators` (administrators only), `chat`, `all_chat_administrators` (administrators only), `all_group_chats`, `default`, each tried with the language before without one. A list registered for another language answers nothing and leaves the next step of the chain to answer.
+
+A scope names its chat by integer id, given as a number or a string of digits, or by the `@username` of a configured group or channel, the way the chat information methods resolve one; a username the stand cannot resolve is answered the way Telegram answers it, `Bad Request: chat not found`. A chat with a positive id the stand has not seen is a private chat, a negative one a group, so the administrator and member scopes are refused for the first. `is_ephemeral` of a command is kept and answered back, but a message is never ephemeral.
+
+## Payments
+
+`sendInvoice` stores an invoice message. Its `total_amount` is the sum of the `prices`, the title is cut to 64 characters and the description to 255, as Telegram cuts them, and the `payload` is kept for the pre-checkout query and the payment service message: it is not part of the wire `Invoice` object, as on Telegram. An invoice can be forwarded but not copied, and its text cannot be edited.
+
+The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_checkout_query`. The query carries the currency, the total and the payload of the invoice itself, so a bot that re-checks the price against its own catalogue meets whatever the invoice said - including a price that has moved on since. The query takes exactly one answer: `answerPreCheckoutQuery` refuses the second one the way it refuses a query it never issued. Confirming one with `ok=true` appends a `successful_payment` service message to the chat and queues it, as Telegram does once the money is taken; refusing one takes no money and delivers nothing. `POST /sim/payment` delivers a payment service message of its own, for a charge taken elsewhere and for a `refunded_payment`. On the chat page an invoice shows its Pay button, Telegram's own when its keyboard has none, and a tap on it is `POST /sim/invoice/pay`.
+
+`start_parameter` is kept on the invoice and answered back on the wire, empty when the bot gave none. A currency other than `XTR` needs a `provider_token`, which the stand takes whatever it is; `max_tip_amount`, `suggested_tip_amounts`, `provider_data`, the photo and `need_*` fields are recorded and have no other effect. Order info and shipping are not modelled: neither `PreCheckoutQuery` nor `SuccessfulPayment` carries an `order_info`.
+
 ## Limits
 
 | Limit | Value |
@@ -156,6 +175,11 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 | inline results | At most 50; result ids contain 1 to 64 bytes. |
 | prepared message | 5 minutes in the stand. |
 | `copy_text.text` | 1 to 256 characters. |
+| a bot command | 1 to 32 lower-case Latin letters, digits and `_` after trimming and dropping a leading `/`; its description 1 to 256 characters after trimming. |
+| `title` of `sendInvoice` | Not blank; cut to 64 characters. |
+| `description` of `sendInvoice` | Not empty; cut to 255 characters. |
+| `payload` of `sendInvoice` | 1 to 128 bytes. |
+| `prices` of `sendInvoice` | At least one item, exactly one for payments in Telegram Stars; an item may be negative (a discount), the total has to be positive. |
 | `limit` of `getUpdates` | 100. |
 | a draft's lifetime | 30 seconds after its last revision. |
 | "typing…" after `sendChatAction` | 5 seconds. |
@@ -171,12 +195,23 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | any method the stand does not serve | always (404) | `Not Found: method not found` |
 | a path that is not `/bot<token>/<method>` | always (404) | `Not Found` |
 | `getUpdates` | `allowed_updates` is not a JSON array | `Bad Request: can't parse allowed_updates JSON array` |
-| `setMyCommands` | `commands` is missing or not a JSON list of commands | `Bad Request: can't parse commands JSON object` |
+| `setMyCommands` | `commands` is not JSON / not an array | `Bad Request: can't parse commands JSON object` / `Bad Request: expected an Array of BotCommand` |
+| same | a command is not an object, or has no `command` or `description` | `Bad Request: can't parse BotCommand: expected an Object` / `...: Can't find field "command"` / `...: Can't find field "description"` |
+| same | after trimming and dropping a leading `/`, a command is empty or past 32 characters | `Bad Request: command must be non-empty` / `Bad Request: command length must not exceed 32` |
+| same | a command holds anything but lower-case Latin letters, digits and `_` | `Bad Request: BOT_COMMAND_INVALID` |
+| same | after trimming, a description is empty or past 256 characters | `Bad Request: command description must be non-empty` / `Bad Request: command description length must not exceed 256` |
+| `setMyCommands`, `getMyCommands`, `deleteMyCommands` | `scope` is not JSON / not a JSON object | `Bad Request: can't parse BotCommandScope JSON object` / `Bad Request: can't parse BotCommandScope: BotCommandScope must be an Object` |
+| same | `scope.type` is missing / not a string / not one of the seven the Bot API defines | `Bad Request: can't parse BotCommandScope: Can't find field "type"` / `...: Field "type" must be of type String` / `...: Unsupported type specified` |
+| same | a chat scope has no `chat_id` / an empty one | `Bad Request: can't parse BotCommandScope: Can't find field "chat_id"` / `...: Empty chat_id specified` |
+| same | a `chat_member` scope has no `user_id` / one that is not an integer / one that is not positive | `Bad Request: can't parse BotCommandScope: Can't find field "user_id"` / `...: Field "user_id" must be a valid Number` / `...: Invalid user_id specified` |
+| same | a chat scope names a username that is not a configured group or channel, or chat 0 | `Bad Request: chat not found` |
+| same | a `chat_administrators` or `chat_member` scope names a private chat / a scope names a channel | `Bad Request: can't use specified scope in private chats` / `Bad Request: can't change commands in channel chats` |
+| same | `language_code` is neither empty nor two lower-case Latin letters | `Bad Request: invalid language code specified` |
 | `sendMessage`, `sendPhoto`, `sendDocument`, `editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `sendChatAction`, `sendRichMessage`, `sendRichMessageDraft` | `chat_id` is missing, zero or not an integer | `Bad Request: chat_id is empty` |
 | `sendMessage`, `editMessageText` | `text` is empty | `Bad Request: message text is empty` |
 | `sendMessage`, `editMessageText` | `text` is over 4096 characters | `Bad Request: message is too long` |
-| `sendMessage`, `sendPhoto`, `sendDocument`, `sendRichMessage`, `editMessageText`, `editMessageReplyMarkup` | `inline_keyboard` is not an array, `null` included: what a library sends for a keyboard built from no rows | `Bad Request: Field "inline_keyboard" must be of type Array` |
-| same | a button has no action, only `text` | `Bad Request: Text buttons are not allowed in the inline keyboard` |
+| `sendMessage`, `sendPhoto`, `sendDocument`, `sendRichMessage`, `editMessageText`, `editMessageReplyMarkup` | `inline_keyboard` is not an array, `null` included: what a library sends for a keyboard built from no rows | `Bad Request: field "inline_keyboard" must be of type Array` |
+| same | a button has no action, only `text` | `Bad Request: can't parse InlineKeyboardButton: Text buttons are not allowed in the inline keyboard` |
 | same | a button has more than one of `callback_data`, `url` and `web_app` (stricter than Telegram, see above) | `Bad Request: BUTTON_TYPE_INVALID` |
 | same | `callback_data` is over 64 bytes | `Bad Request: BUTTON_DATA_INVALID` |
 | same | a `web_app` button in a chat that is not private | `Bad Request: BUTTON_TYPE_INVALID` |
@@ -192,8 +227,25 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | same | the message is the person's, not the bot's | `Bad Request: message can't be edited` |
 | same | neither the text nor the keyboard would change | `Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message` |
 | `deleteMessage` | the message is not in the chat or was already deleted | `Bad Request: message to delete not found` |
-| `answerCallbackQuery` | `callback_query_id` is empty | `Bad Request: callback_query_id is empty` |
-| same | the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
+| `answerCallbackQuery` | `callback_query_id` is empty, the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
+| `sendInvoice` | `chat_id` is missing, zero or not an integer | `Bad Request: chat_id is empty` |
+| same | `title`, `description`, `payload`, `currency` or `prices` is empty, checked in that order | `Bad Request: parameter "<name>" is required` |
+| same | `payload` is not UTF-8 | `Bad Request: the payload must be encoded in UTF-8` |
+| same | `prices` is not JSON / not an array | `Bad Request: can't parse prices JSON object` / `Bad Request: expected an Array of LabeledPrice` |
+| same | a price is not an object, has no or an empty `label`, or no `amount` | `Bad Request: can't parse LabeledPrice: LabeledPrice must be an Object` / `...: Can't find field "label"` / `...: LabeledPrice label must be non-empty` / `...: Can't find field "amount"` |
+| same | an `amount` is not an integer (a number or a string of digits) | `Bad Request: can't parse LabeledPrice: Field "amount" must be a valid Number` |
+| same | `prices` is an empty array | `Bad Request: there must be at least one price part` |
+| same | an `amount` is past 999999999999 either way | `Bad Request: too big amount of the currency specified` |
+| same | the total of the prices is zero or negative / past 999999999999 | `Bad Request: total price must be positive` / `Bad Request: total price is too big` |
+| same | `title` is nothing but spaces | `Bad Request: INVOICE_TITLE_INVALID` |
+| same | `payload` is past 128 bytes | `Bad Request: INVOICE_PAYLOAD_INVALID` |
+| same | `currency` is not `XTR` and `provider_token` is empty | `Bad Request: PAYMENT_PROVIDER_INVALID` |
+| same | `currency` is `XTR` and `prices` does not hold exactly one item | `Bad Request: STARS_INVOICE_INVALID` |
+| same | a keyboard has no Pay button / has one, but not first in the first row | `Bad Request: REPLY_MARKUP_BUY_EMPTY` / `Bad Request: BUTTON_POS_INVALID` |
+| `editMessageText` | the message is an invoice | `Bad Request: message can't be edited` |
+| `copyMessage` | the message is an invoice | `Bad Request: the message can't be copied` |
+| `answerPreCheckoutQuery` | `ok` is not true and `error_message` is empty | `Bad Request: parameter "error_message" is required` |
+| same | `pre_checkout_query_id` is empty, the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
 | `sendRichMessage` | `rich_message` is not a JSON object with a non-empty `markdown` or `html` | `Bad Request: can't parse rich_message JSON object` |
 | `sendRichMessageDraft` | `draft_id` is missing, zero or not an integer | `Bad Request: draft_id must be a non-zero integer` |
 | same | `rich_message` is missing or not a JSON object | `Bad Request: can't parse rich_message JSON object` |
@@ -226,14 +278,15 @@ Additional refusals for the extended methods:
 | `setWebhook` | malformed URL / external HTTP / unsupported external port | `Bad Request: invalid webhook URL specified` / `Bad Request: bad webhook: An HTTPS URL must be provided for webhook` / `Bad Request: bad webhook: Webhook can be set up only on ports 80, 88, 443 or 8443` |
 | `setWebhook` | secret over 256 bytes / characters outside A-Z, a-z, 0-9, `_`, `-` | `Bad Request: secret token is too long` / `Bad Request: secret token contains illegal characters` |
 
-The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate decoding failures currently use `Bad Request: invalid certificate` rather than OpenSSL's platform-specific diagnostic; these are deliberate validation approximations. Delivery/network diagnostics come from Go's HTTP client. Advanced parameters not listed here are recorded without affecting state.
+The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate decoding failures currently use `Bad Request: invalid certificate` rather than OpenSSL's platform-specific diagnostic; this is a deliberate validation approximation. Delivery/network diagnostics come from Go's HTTP client. Advanced parameters not listed here are recorded without affecting state.
 
 ## Not implemented
 
-- Methods outside the [table above](#methods) answer `404` with `Not Found: method not found`, including payments, stickers, polls, live photos, games, forum topics and chat administration mutations.
+- Methods outside the [table above](#methods) answer `404` with `Not Found: method not found`, including stickers, polls, live photos, games, forum topics and chat administration mutations.
 - Incoming location/contact messages, `edited_message`, `channel_post`, membership and reaction updates are not injected. Chat configuration changes no update queue.
-- Inline games/stickers, invoice/rich input content, cache behavior, pagination buttons and query timeouts are not modelled. `cache_time`, `is_personal`, `next_offset` and the inline results button are only recorded.
-- Media thumbnails, codec validation, live locations, full Telegram membership/permission enforcement and service-message copy restrictions are not modelled. Inline media edits currently resolve uploads as ordinary edits; Telegram permits only existing ids and URLs for inline targets.
+- Inline games/stickers, rich input content, cache behavior, pagination buttons and query timeouts are not modelled. `cache_time`, `is_personal`, `next_offset` and the inline results button are only recorded.
+- Payments go no further than a bot can see: a payment provider, shipping, order info and `order_info` on the pre-checkout query and the payment are not modelled, `shipping_query` is never sent, and a charge can only be taken or returned - never left pending. `is_ephemeral` of a command is kept but a message is never ephemeral.
+- Media thumbnails, codec validation, live locations, full Telegram membership/permission enforcement and service-message copy restrictions other than an invoice's are not modelled. Inline media edits currently resolve uploads as ordinary edits; Telegram permits only existing ids and URLs for inline targets.
 - Formatting: `parse_mode` is not parsed, so `can't parse entities` never happens on its own. Schedule a fault with `contains` to see it ([sim-api.md](sim-api.md#faults)).
 - Reply keyboards (`keyboard`, `remove_keyboard`, `force_reply`) are accepted and dropped, not shown.
 - Rate limits are not enforced. A `429` happens only when a fault is scheduled.
