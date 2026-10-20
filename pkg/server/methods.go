@@ -55,7 +55,9 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 	case "setmycommands":
 		s.setMyCommands(w, method, params)
 	case "getmycommands":
-		s.writeResult(w, method, params, s.Commands())
+		s.getMyCommands(w, method, params)
+	case "deletemycommands":
+		s.deleteMyCommands(w, method, params)
 	case "sendmessage":
 		s.sendMessage(w, method, params)
 	case "sendphoto":
@@ -92,6 +94,10 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.sendChatAction(w, method, params)
 	case "answercallbackquery":
 		s.answerCallbackQuery(w, method, params)
+	case "sendinvoice":
+		s.sendInvoice(w, method, params)
+	case "answerprecheckoutquery":
+		s.answerPreCheckoutQuery(w, method, params)
 	case "sendrichmessage":
 		s.sendRichMessage(w, method, params)
 	case "sendrichmessagedraft":
@@ -227,18 +233,6 @@ func (s *Server) closed() bool {
 	}
 }
 
-func (s *Server) setMyCommands(w http.ResponseWriter, method string, params url.Values) {
-	var cmds []botapi.BotCommand
-	if err := json.Unmarshal([]byte(params.Get("commands")), &cmds); err != nil {
-		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't parse commands JSON object", 0)
-		return
-	}
-	s.mu.Lock()
-	s.commands = cmds
-	s.mu.Unlock()
-	s.writeResult(w, method, params, true)
-}
-
 func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Values) {
 	chatID, ok := chatIDOf(params)
 	if !ok {
@@ -293,7 +287,7 @@ func (s *Server) keyboardFor(chatID int64, params url.Values) (*botapi.InlineKey
 	s.mu.Lock()
 	chatType := s.chatTypeLocked(chatID)
 	s.mu.Unlock()
-	if problem := validateKeyboard(markup, chatType); problem != "" {
+	if problem := validateKeyboard(markup, chatType, false); problem != "" {
 		return nil, problem
 	}
 	return markup, ""
@@ -339,7 +333,7 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 	}
 	newMarkup, problem := parseKeyboard(params.Get("reply_markup"))
 	if problem == "" {
-		problem = validateKeyboard(newMarkup, target.msg.Chat.Type)
+		problem = validateKeyboard(newMarkup, target.msg.Chat.Type, false)
 	}
 	if problem != "" {
 		s.mu.Unlock()
@@ -631,16 +625,17 @@ const callbackDataMax = 64
 // invisible until a real chat shows a keyboard that never arrives - and a
 // web_app button outside a private chat or to an address Telegram would not
 // open. It also refuses a button with more than one action, which Telegram
-// would read as its first. It returns the error description, or "" for a
-// keyboard the stand takes in a chat of chatType.
-func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string) string {
+// would read as its first, and a Pay button outside an invoice. payAllowed
+// says the keyboard belongs to an invoice. It returns the error description,
+// or "" for a keyboard the stand takes in a chat of chatType.
+func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string, payAllowed bool) string {
 	if kb == nil {
 		return ""
 	}
 	for _, row := range kb.InlineKeyboard {
 		for _, b := range row {
 			actions := 0
-			for _, set := range []bool{b.CallbackData != "", b.URL != "", b.WebApp != nil, b.SwitchInlineQuery != nil, b.SwitchInlineQueryCurrentChat != nil, b.CopyText != nil} {
+			for _, set := range []bool{b.CallbackData != "", b.URL != "", b.WebApp != nil, b.SwitchInlineQuery != nil, b.SwitchInlineQueryCurrentChat != nil, b.CopyText != nil, b.Pay} {
 				if set {
 					actions++
 				}
@@ -651,6 +646,9 @@ func validateKeyboard(kb *botapi.InlineKeyboardMarkup, chatType string) string {
 			case actions > 1:
 				// Telegram takes the first action in its own order; the
 				// stand refuses the button, so an ambiguous one never passes.
+				return "Bad Request: BUTTON_TYPE_INVALID"
+			}
+			if b.Pay && !payAllowed {
 				return "Bad Request: BUTTON_TYPE_INVALID"
 			}
 			if len(b.CallbackData) > callbackDataMax {

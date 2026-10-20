@@ -399,7 +399,7 @@ func (s *Server) editMedia(w http.ResponseWriter, req *http.Request, method stri
 	}
 	markup, problem := parseKeyboard(params.Get("reply_markup"))
 	if problem == "" {
-		problem = validateKeyboard(markup, target.msg.Chat.Type)
+		problem = validateKeyboard(markup, target.msg.Chat.Type, false)
 	}
 	if target.file == nil && replacement == nil && problem == "" {
 		problem = "Bad Request: there is no caption in the message to edit"

@@ -45,6 +45,8 @@ t.Cleanup(func() {
 | `InjectMessage(in IncomingMessage) (updateID, messageID int)` | The person sends a message; it is stored in the chat and queued as the next update. |
 | `InjectCallback(in IncomingCallback) (updateID int, callbackID string, err error)` | The person taps a button, by `Label` or by `Data`; an error says why nothing could be tapped. |
 | `StopDraft(in DraftStop) (updateID int, err error)` | The person presses Stop under a draft streamed with `can_stop`; an error says why nothing could be stopped. |
+| `PayInvoice(in InvoicePay) (updateID int, queryID string, err error)` | The person starts paying an invoice; the answer is the `pre_checkout_query` it queued. No money moves until the bot confirms. |
+| `InjectPayment(in IncomingPayment) (updateID, messageID int, err error)` | A payment service message arrives: a `successful_payment`, or a `refunded_payment` when `Kind` says so. |
 | `LaunchWebApp(req WebAppLaunch) (LaunchedWebApp, error)` | The person opens a Mini App; the answer is the launch address and the signed launch data. |
 | `InjectMedia(in IncomingMedia) (int, int, error)` | Store incoming bytes and queue a message; JSON `Data` is base64, Go `Data` is `[]byte`. `MediaGroupID` makes it part of an album, `Mention` and `ReplyToMessageID` of the embedded `IncomingMessage` apply to the caption and the reply. |
 | `InjectInlineQuery(in IncomingInlineQuery) (int, string, error)` | Queue an inline query and return update/query ids. Requires `InlineMode`. |
@@ -55,7 +57,7 @@ t.Cleanup(func() {
 | `ConfigureChat(in ChatConfiguration) error` | Replace copied chat metadata and members; preserve the transcript. |
 | `ConfigureUserProfile(in UserProfileConfiguration) error` | Replace a user's profile photo sets using known photo ids. |
 
-`IncomingMessage`, `IncomingCallback`, `DraftStop` and `WebAppLaunch` are the request bodies of `POST /sim/message`, `POST /sim/callback`, `POST /sim/draft/stop` and `POST /sim/webapp/launch`, with the same fields and defaults: zero fields mean user 4242 `alice` in her private chat 4242. The fields are listed in [sim-api.md](sim-api.md#post-simmessage) and [mini-apps.md](mini-apps.md#launches). The default user's id is not exported; tests write `4242`.
+`IncomingMessage`, `IncomingCallback`, `DraftStop`, `InvoicePay`, `IncomingPayment` and `WebAppLaunch` are the request bodies of `POST /sim/message`, `POST /sim/callback`, `POST /sim/draft/stop`, `POST /sim/invoice/pay`, `POST /sim/payment` and `POST /sim/webapp/launch`, with the same fields and defaults: zero fields mean user 4242 `alice` in her private chat 4242. The fields are listed in [sim-api.md](sim-api.md#post-simmessage) and [mini-apps.md](mini-apps.md#launches). The default user's id is not exported; tests write `4242`.
 
 ### Reading what the bot did
 
@@ -65,7 +67,9 @@ t.Cleanup(func() {
 | `Chats() []ChatSummary` | The chats the stand knows, by id. |
 | `Calls(method string) []Call` | The outbox, oldest first, of one method (compared without regard to case) or of every method for `""`. |
 | `WaitCall(method string, n int, timeout time.Duration) bool` | Waits until the outbox holds at least n calls of the method, checking every 10 ms; false when the timeout passed first. |
-| `Commands() []botapi.BotCommand` | What the bot last set with `setMyCommands`. |
+| `Commands() []botapi.BotCommand` | The default-scope list with no language, `[]` before any `setMyCommands`. |
+| `CommandsFor(scope botapi.BotCommandScope, languageCode string) []botapi.BotCommand` | The commands a user of the scope would see, speaking that language ([bot-api.md](bot-api.md#commands)). |
+| `CommandLists() []CommandList` | Every list the bot registered, as `Scope`, `LanguageCode` and `Commands`, in a stable order. |
 | `MenuButton(chat int64) botapi.MenuButton` | The menu button a chat shows; chat 0 is the bot's own. |
 | `File(id string) ([]byte, bool)` | A copy of the bytes the bot uploaded under a `file_id`. |
 | `PendingUpdates() int` | Updates queued and not yet confirmed by a poll. |
@@ -218,7 +222,7 @@ t.Cleanup(func() {
 
 ## pkg/botapi
 
-The wire shapes of the Bot API objects the stand sends and reads, written for the stand rather than borrowed from a Telegram library. In addition to messages, updates, users, chats and keyboards, these include `File`, `Video`, `Audio`, `VideoNote`, `Location`, `Venue`, `Contact`, `WebAppData`, `InlineQuery`, `ChosenInlineResult`, `SentWebAppMessage`, `PreparedInlineMessage`, `MessageID`, `MessageOrigin` and `UserProfilePhotos`. `ChatFullInfo` and `ChatMember` are map types so tests can configure the many optional Telegram fields. They carry the subset of fields the stand produces. A test decodes what the stand answered with them, for example the message a call returned:
+The wire shapes of the Bot API objects the stand sends and reads, written for the stand rather than borrowed from a Telegram library. In addition to messages, updates, users, chats and keyboards, these include `File`, `Video`, `Audio`, `VideoNote`, `Location`, `Venue`, `Contact`, `WebAppData`, `InlineQuery`, `ChosenInlineResult`, `SentWebAppMessage`, `PreparedInlineMessage`, `MessageID`, `MessageOrigin`, `UserProfilePhotos`, `BotCommand`, `BotCommandScope`, `LabeledPrice`, `Invoice`, `PreCheckoutQuery`, `SuccessfulPayment` and `RefundedPayment`. `ChatFullInfo` and `ChatMember` are map types so tests can configure the many optional Telegram fields. They carry the subset of fields the stand produces. A test decodes what the stand answered with them, for example the message a call returned:
 
 ```go
 call := fake.Calls("sendMessage")[0]

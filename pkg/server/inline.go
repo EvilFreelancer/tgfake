@@ -122,7 +122,7 @@ func parseInlineResult(raw json.RawMessage) (inlineResult, string) {
 	if problem != "" {
 		return result, problem
 	}
-	if problem := validateKeyboard(markup, "private"); problem != "" {
+	if problem := validateKeyboard(markup, "private", false); problem != "" {
 		return result, problem
 	}
 	params := result.params()

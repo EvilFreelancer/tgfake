@@ -283,6 +283,8 @@ func updateKind(u botapi.Update) string {
 		return "chosen_inline_result"
 	case u.CallbackQuery != nil:
 		return "callback_query"
+	case u.PreCheckoutQuery != nil:
+		return "pre_checkout_query"
 	case u.StoppedMessageGeneration != nil:
 		return "stopped_message_generation"
 	default:

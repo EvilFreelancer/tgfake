@@ -120,7 +120,7 @@ func TestToken_Mismatch(t *testing.T) {
 
 func TestUnknownMethod_404Envelope(t *testing.T) {
 	s := newStand(t, Options{})
-	status, body := s.call("sendInvoice", url.Values{"chat_id": {"1"}})
+	status, body := s.call("sendPoll", url.Values{"chat_id": {"1"}})
 	if status != http.StatusNotFound || body["ok"] != false || !strings.Contains(body["description"].(string), "method not found") {
 		t.Fatalf("unknown method: %d %v", status, body)
 	}
