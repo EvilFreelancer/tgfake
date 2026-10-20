@@ -35,7 +35,7 @@ The packages and the command import nothing outside the standard library. The on
 | [`.github/workflows/release.yaml`](../.github/workflows/release.yaml) | Publishes a release when a `vX.Y.Z` tag is pushed. |
 | [`docs/`](.) | This reference. [`README.md`](../README.md) is the landing page and links every page. |
 
-Inside `pkg/server`, `media.go` owns media sends/edits and authenticated downloads, `incoming_media.go` incoming files, `relay.go` copies/forwards and static contact/location sends, `inline.go` inline and Mini App messages, `information.go` configurable chat/member/profile information, and `webhook.go` the delivery worker. Network requests use `Options.HTTPClient` and are cancelled on `Close`.
+Inside `pkg/server`, `media.go` owns media sends/edits and authenticated downloads, `incoming_media.go` incoming files, `relay.go` copies/forwards and static contact/location sends, `inline.go` inline and Mini App messages, `commands.go` the command lists per scope and language, `payments.go` invoices, pre-checkout queries and payment service messages, `information.go` configurable chat/member/profile information, and `webhook.go` the delivery worker. Network requests use `Options.HTTPClient` and are cancelled on `Close`.
 
 The release asset names are spelled the same way in `.goreleaser.yaml`, `scripts/install.sh`, `action.yml` and [ci.md](ci.md): renaming them in one place means renaming them in all of them.
 
@@ -67,9 +67,12 @@ The happy path of a feature is a Gherkin scenario in `features/`, and a godog ha
 | [`features/update_lifecycle.feature`](../features/update_lifecycle.feature) | [`pkg/server/bdd_lifecycle_test.go`](../pkg/server/bdd_lifecycle_test.go), with the server's clock under the test's control. |
 | [`features/mini_app.feature`](../features/mini_app.feature) | [`pkg/server/bdd_mini_app_test.go`](../pkg/server/bdd_mini_app_test.go). |
 | [`features/bot_capabilities.feature`](../features/bot_capabilities.feature) | [`pkg/server/bdd_capabilities_test.go`](../pkg/server/bdd_capabilities_test.go), covering file downloads, inline selection, prepared sharing, webhooks and membership information. |
+| [`features/incoming_media.feature`](../features/incoming_media.feature) | [`pkg/server/bdd_incoming_media_test.go`](../pkg/server/bdd_incoming_media_test.go). |
+| [`features/bot_commands.feature`](../features/bot_commands.feature) | [`pkg/server/bdd_commands_test.go`](../pkg/server/bdd_commands_test.go), against the scope and language chain of `getMyCommands`. |
+| [`features/payments.feature`](../features/payments.feature) | [`pkg/server/bdd_payments_test.go`](../pkg/server/bdd_payments_test.go), from `sendInvoice` through the pre-checkout query to the payment service messages. |
 | [`features/serverless.feature`](../features/serverless.feature) | [`pkg/serverless/bdd_serverless_test.go`](../pkg/serverless/bdd_serverless_test.go), against the Docker runtime and counter example. |
 
-Edge cases and refusals are ordinary unit tests next to the code: `pkg/server/*_test.go` for the Bot API, the update queue, media, drafts and the simulation API, `pkg/llmstub/llmstub_test.go`, `pkg/webapp/webapp_test.go` (including a known signing vector), `internal/chatpage/page_test.go`, which holds the page to having no outside asset, and `cmd/tgfake/main_test.go`. `go test ./...` also runs the tests of `examples/echobot`, so the example stays a working bot.
+Edge cases and refusals are ordinary unit tests next to the code: `pkg/server/*_test.go` for the Bot API, the update queue, media, drafts, commands, payments and the simulation API, `pkg/llmstub/llmstub_test.go`, `pkg/webapp/webapp_test.go` (including a known signing vector), `internal/chatpage/page_test.go`, which holds the page to having no outside asset, and `cmd/tgfake/main_test.go`. `go test ./...` also runs the tests of `examples/echobot`, so the example stays a working bot.
 
 A change starts with a failing scenario for a new behaviour, or a failing unit test for an edge case or a bug, and carries its documentation: a new Bot API method is a row of [bot-api.md](bot-api.md), a new route a section of [sim-api.md](sim-api.md), a new flag a row of [command.md](command.md).
 

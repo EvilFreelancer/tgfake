@@ -260,8 +260,6 @@ func (s *Server) commandsForLocked(q commandScope, languageCode string) []botapi
 		// A list registered for another language is not the answer for this
 		// one: it neither wins nor blocks a wider scope's list.
 		if key.lang != languageCode && key.lang != "" {
-			// A list registered for another language is not the answer for
-			// this one: it neither wins nor blocks a wider scope's list.
 			continue
 		}
 		lang := 1

@@ -302,8 +302,6 @@ func (s *Server) WaitCall(method string, n int, timeout time.Duration) bool {
 	}
 }
 
-// Commands is defined in commands.go, next to the scope it resolves through.
-
 // record appends a call to the outbox. Caller holds s.mu.
 func (s *Server) recordLocked(method string, params url.Values, status int, body []byte) {
 	flat := make(map[string]string, len(params))
