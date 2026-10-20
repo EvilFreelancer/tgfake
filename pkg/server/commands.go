@@ -103,83 +103,153 @@ func (c commandScope) wire() botapi.BotCommandScope {
 	return botapi.BotCommandScope{Type: c.kind, ChatID: c.chatID, UserID: c.userID}
 }
 
-// commandScopeTypes are the BotCommandScope types the Bot API defines.
-var commandScopeTypes = map[string]bool{
-	"default":                 true,
-	"all_private_chats":       true,
-	"all_group_chats":         true,
-	"all_chat_administrators": true,
-	"chat":                    true,
-	"chat_administrators":     true,
-	"chat_member":             true,
+// scopeProblem is the description of a scope the Bot API server cannot read:
+// it prefixes the reason the way the server does.
+func scopeProblem(reason string) string {
+	return "Bad Request: Can't parse BotCommandScope: " + reason
 }
 
-// parseCommandScope reads the scope of a commands call. An absent scope and
-// the literal null are the default scope. It returns the scope and the
-// description of the refusal, if any.
-func parseCommandScope(raw string) (commandScope, string) {
-	if raw = strings.TrimSpace(raw); raw == "" || raw == "null" {
-		return defaultCommandScope, ""
+// parseCommandScope reads the scope of a commands call the way the Bot API
+// server reads it: an absent scope is the default one, and every other value
+// has to be a BotCommandScope object. It returns the scope, the chat_id a
+// chat scope names (an integer or an @username, resolved by
+// resolveScopeChatLocked) and the description of the refusal, if any.
+func parseCommandScope(raw string) (commandScope, string, string) {
+	if strings.TrimSpace(raw) == "" {
+		return defaultCommandScope, "", ""
+	}
+	if !json.Valid([]byte(raw)) {
+		return defaultCommandScope, "", "Bad Request: Can't parse BotCommandScope JSON object"
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil || fields == nil {
-		return defaultCommandScope, "Bad Request: can't parse scope JSON object"
+		return defaultCommandScope, "", scopeProblem("BotCommandScope must be an Object")
 	}
-	// The fields are read one by one: Telegram takes chat_id as an integer or
-	// a username, so the whole scope cannot be unmarshalled into a struct.
-	kind := ""
-	if raw, ok := fields["type"]; ok {
-		if json.Unmarshal(raw, &kind) != nil {
-			return defaultCommandScope, "Bad Request: unsupported command scope type"
-		}
-	}
-	if !commandScopeTypes[kind] {
-		return defaultCommandScope, "Bad Request: unsupported command scope type"
-	}
-	scope := commandScope{kind: kind}
-	if raw, ok := fields["user_id"]; ok {
-		if json.Unmarshal(raw, &scope.userID) != nil {
-			return defaultCommandScope, "Bad Request: invalid user_id specified"
-		}
+	kind, problem := jsonStringField(fields, "type")
+	if problem != "" {
+		return defaultCommandScope, "", scopeProblem(problem)
 	}
 	switch kind {
+	case "default", "all_private_chats", "all_group_chats", "all_chat_administrators":
+		return commandScope{kind: kind}, "", ""
 	case "chat", "chat_administrators", "chat_member":
-		id, ok := scopeChatID(fields)
-		if !ok {
-			return defaultCommandScope, "Bad Request: Invalid chat_id specified"
-		}
-		scope.chatID = id
-		if kind == "chat_member" && scope.userID == 0 {
-			return defaultCommandScope, "Bad Request: invalid user_id specified"
-		}
+	default:
+		return defaultCommandScope, "", scopeProblem("Unsupported type specified")
 	}
-	return scope, ""
+	chat, problem := jsonStringField(fields, "chat_id")
+	if problem != "" {
+		return defaultCommandScope, "", scopeProblem(problem)
+	}
+	if chat == "" {
+		return defaultCommandScope, "", scopeProblem("Empty chat_id specified")
+	}
+	scope := commandScope{kind: kind}
+	if kind == "chat_member" {
+		user, problem := jsonIntegerField(fields, "user_id")
+		if problem != "" {
+			return defaultCommandScope, "", scopeProblem(problem)
+		}
+		if user <= 0 {
+			return defaultCommandScope, "", scopeProblem("Invalid user_id specified")
+		}
+		scope.userID = user
+	}
+	return scope, chat, ""
 }
 
-// scopeChatID reads the chat_id of a chat scope. Telegram takes an integer or
-// a username; the stand resolves chats by integer id only, so a username is
-// refused the way setChatMenuButton refuses a chat_id it cannot use.
-func scopeChatID(fields map[string]json.RawMessage) (int64, bool) {
-	raw, ok := fields["chat_id"]
+// jsonStringField reads a field the Bot API server takes as a string, which
+// a number also is. It returns the reason the field cannot be read, if any.
+func jsonStringField(fields map[string]json.RawMessage, name string) (string, string) {
+	raw, ok := fields[name]
 	if !ok {
-		return 0, false
+		return "", `Can't find field "` + name + `"`
 	}
 	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		if text = strings.TrimSpace(text); text == "" {
-			return 0, false
-		}
-		id, err := strconv.ParseInt(text, 10, 64)
-		if err != nil || id == 0 {
-			return 0, false
-		}
-		return id, true
+	if json.Unmarshal(raw, &text) == nil && string(raw) != "null" {
+		return text, ""
 	}
-	var id int64
-	if json.Unmarshal(raw, &id) != nil || id == 0 {
-		return 0, false
+	var number json.Number
+	if json.Unmarshal(raw, &number) == nil && string(raw) != "null" {
+		return number.String(), ""
 	}
-	return id, true
+	return "", `Field "` + name + `" must be of type String`
+}
+
+// jsonIntegerField reads a field the Bot API server takes as an integer,
+// given as a number or as a string of digits. It returns the reason the field
+// cannot be read, if any.
+func jsonIntegerField(fields map[string]json.RawMessage, name string) (int64, string) {
+	text, problem := jsonStringField(fields, name)
+	if problem != "" {
+		if _, ok := fields[name]; ok {
+			return 0, `Field "` + name + `" must be a Number`
+		}
+		return 0, problem
+	}
+	id, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, `Field "` + name + `" must be a valid Number`
+	}
+	return id, ""
+}
+
+// resolveScopeChatLocked fills in the chat a chat scope names, by integer id
+// or by the @username of a configured group or channel, and refuses a scope
+// Telegram refuses for that chat: the administrator and member scopes do not
+// exist in a private chat, and a channel has no commands. A chat the stand
+// cannot resolve is a chat Telegram does not find. Caller holds s.mu.
+func (s *Server) resolveScopeChatLocked(scope *commandScope, chat string) string {
+	if chat == "" {
+		return ""
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(chat), 10, 64)
+	if err != nil {
+		var ok bool
+		if id, ok = s.chatByUsernameLocked(chat); !ok {
+			return "Bad Request: chat not found"
+		}
+	}
+	if id == 0 {
+		return "Bad Request: chat not found"
+	}
+	scope.chatID = id
+	switch s.chatTypeLocked(id) {
+	case "private":
+		if scope.kind != "chat" {
+			return "Bad Request: Can't use specified scope in private chats"
+		}
+	case "channel":
+		return "Bad Request: Can't change commands in channel chats"
+	}
+	return ""
+}
+
+// languageCodeProblem refuses a language_code that is neither empty nor two
+// lower-case Latin letters, as Telegram does for every commands call.
+func languageCodeProblem(code string) string {
+	if code == "" {
+		return ""
+	}
+	if len(code) == 2 && 'a' <= code[0] && code[0] <= 'z' && 'a' <= code[1] && code[1] <= 'z' {
+		return ""
+	}
+	return "Bad Request: Invalid language code specified"
+}
+
+// commandKeyOf reads the scope and the language a commands call names, in
+// the order Telegram checks them. It returns the key and the description of
+// the refusal, if any.
+func (s *Server) commandKeyOf(params url.Values) (commandKey, string) {
+	scope, chat, problem := parseCommandScope(params.Get("scope"))
+	if problem == "" {
+		s.mu.Lock()
+		problem = s.resolveScopeChatLocked(&scope, chat)
+		s.mu.Unlock()
+	}
+	if problem == "" {
+		problem = languageCodeProblem(params.Get("language_code"))
+	}
+	return commandKey{scope: scope, lang: params.Get("language_code")}, problem
 }
 
 func (s *Server) setMyCommands(w http.ResponseWriter, method string, params url.Values) {
@@ -188,7 +258,7 @@ func (s *Server) setMyCommands(w http.ResponseWriter, method string, params url.
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't parse commands JSON object", 0)
 		return
 	}
-	scope, problem := parseCommandScope(params.Get("scope"))
+	key, problem := s.commandKeyOf(params)
 	if problem != "" {
 		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
@@ -197,28 +267,31 @@ func (s *Server) setMyCommands(w http.ResponseWriter, method string, params url.
 	if s.commandLists == nil {
 		s.commandLists = map[commandKey][]botapi.BotCommand{}
 	}
-	s.commandLists[commandKey{scope: scope, lang: params.Get("language_code")}] = cmds
+	s.commandLists[key] = cmds
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)
 }
 
 func (s *Server) getMyCommands(w http.ResponseWriter, method string, params url.Values) {
-	scope, problem := parseCommandScope(params.Get("scope"))
-	if problem != "" {
-		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
-		return
-	}
-	s.writeResult(w, method, params, s.CommandsFor(scope.wire(), params.Get("language_code")))
-}
-
-func (s *Server) deleteMyCommands(w http.ResponseWriter, method string, params url.Values) {
-	scope, problem := parseCommandScope(params.Get("scope"))
+	key, problem := s.commandKeyOf(params)
 	if problem != "" {
 		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
 		return
 	}
 	s.mu.Lock()
-	delete(s.commandLists, commandKey{scope: scope, lang: params.Get("language_code")})
+	list := s.commandsForLocked(key.scope, key.lang)
+	s.mu.Unlock()
+	s.writeResult(w, method, params, list)
+}
+
+func (s *Server) deleteMyCommands(w http.ResponseWriter, method string, params url.Values) {
+	key, problem := s.commandKeyOf(params)
+	if problem != "" {
+		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
+		return
+	}
+	s.mu.Lock()
+	delete(s.commandLists, key)
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)
 }
@@ -235,9 +308,9 @@ func (s *Server) Commands() []botapi.BotCommand {
 // is set wins, a narrower scope before a wider one and the language's own list
 // before the one with no language.
 func (s *Server) CommandsFor(scope botapi.BotCommandScope, languageCode string) []botapi.BotCommand {
-	query, problem := parseCommandScope(scopeJSON(scope))
-	if problem != "" {
-		return []botapi.BotCommand{}
+	query := commandScope{kind: scope.Type, chatID: scope.ChatID, userID: scope.UserID}
+	if query.kind == "" {
+		query = defaultCommandScope
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -333,14 +406,4 @@ func (s *Server) CommandLists() []CommandList {
 		return a.LanguageCode < b.LanguageCode
 	})
 	return out
-}
-
-// scopeJSON renders a scope the way a bot sends it, so a lookup reuses the
-// parser the methods use.
-func scopeJSON(scope botapi.BotCommandScope) string {
-	raw, err := json.Marshal(scope)
-	if err != nil {
-		return `{"type":"default"}`
-	}
-	return string(raw)
 }

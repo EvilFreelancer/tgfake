@@ -21,10 +21,10 @@ Parameters are read the way the Bot API reads them, so any library works unchang
 | Request | What is read |
 |---------|--------------|
 | `Content-Type: multipart/form-data` | The query string, form fields and file parts, including nested `attach://` references. |
-| `Content-Type: application/json` | The query string and the top-level keys of a JSON object (up to 4 MB). A string value is taken as is; any other value (a number, a boolean, an object, an array, `null`) is kept as its JSON text, so `"reply_markup": {...}` and `"reply_markup": "{...}"` mean the same. |
+| `Content-Type: application/json` | The query string and the top-level keys of a JSON object (up to 4 MB). A string value is taken as is, `null` is an empty value, and any other value (a number, a boolean, an object, an array) is kept as its JSON text, so `"reply_markup": {...}` and `"reply_markup": "{...}"` mean the same. |
 | anything else | The query string and an `application/x-www-form-urlencoded` body. |
 
-A parameter whose value is a Bot API object (`reply_markup`, `reply_parameters`, `allowed_updates`, `commands`, `menu_button`, `rich_message`) is JSON text, as on Telegram. A parameter the stand does not read is accepted, recorded in the outbox with the call, and has no other effect.
+A parameter whose value is a Bot API object (`reply_markup`, `reply_parameters`, `allowed_updates`, `commands`, `scope`, `menu_button`, `rich_message`, `prices`) is JSON text, as on Telegram. A Boolean parameter (`ok`, `show_alert`, `protect_content`, `can_stop`, ...) is true when it reads `true`, `yes` or `1` in any case, as the Bot API server reads it, and false otherwise. A parameter the stand does not read is accepted, recorded in the outbox with the call, and has no other effect.
 
 Send and edit methods require a non-zero integer `chat_id`. Chat information methods also resolve a configured `@channelusername`. Inline edits take `inline_message_id` instead of `chat_id` and `message_id`.
 
@@ -148,7 +148,7 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 The list is chosen by the chain the Bot API documents under "Determining list of commands", walked from the scope of the call downwards: the first list that is set wins. From `chat` in a private chat the chain is `chat` with the language, `chat`, `all_private_chats` with the language, `all_private_chats`, `default` with the language, `default`. From `chat_member` in a group it is `chat_member`, `chat_administrators` (administrators only), `chat`, `all_chat_administrators` (administrators only), `all_group_chats`, `default`, each tried with the language before without one. A list registered for another language answers nothing and leaves the next step of the chain to answer.
 
-A scope names its chat by integer id. Telegram also takes a username; the stand resolves chats by integer id only and refuses a username with `Bad Request: Invalid chat_id specified`, the way `setChatMenuButton` refuses a chat id it cannot use. `is_ephemeral` of a command is kept and answered back, but a message is never ephemeral.
+A scope names its chat by integer id, given as a number or a string of digits, or by the `@username` of a configured group or channel, the way the chat information methods resolve one; a username the stand cannot resolve is answered the way Telegram answers it, `Bad Request: chat not found`. A chat with a positive id the stand has not seen is a private chat, a negative one a group, so the administrator and member scopes are refused for the first. `is_ephemeral` of a command is kept and answered back, but a message is never ephemeral.
 
 ## Payments
 
@@ -178,7 +178,7 @@ The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_che
 | `title` of `sendInvoice` | 1 to 32 characters. |
 | `description` of `sendInvoice` | 1 to 255 characters. |
 | `payload` of `sendInvoice` | 1 to 128 bytes. |
-| `prices` of `sendInvoice` | 1 to 100 items; exactly one for payments in Telegram Stars. |
+| `prices` of `sendInvoice` | At least one item, exactly one for payments in Telegram Stars; an item may be negative (a discount), the total has to be positive. |
 | `limit` of `getUpdates` | 100. |
 | a draft's lifetime | 30 seconds after its last revision. |
 | "typing…" after `sendChatAction` | 5 seconds. |
@@ -195,10 +195,13 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | a path that is not `/bot<token>/<method>` | always (404) | `Not Found` |
 | `getUpdates` | `allowed_updates` is not a JSON array | `Bad Request: can't parse allowed_updates JSON array` |
 | `setMyCommands` | `commands` is missing or not a JSON list of commands | `Bad Request: can't parse commands JSON object` |
-| `setMyCommands`, `getMyCommands`, `deleteMyCommands` | `scope` is not a JSON object | `Bad Request: can't parse scope JSON object` |
-| same | `scope.type` is missing or not one of the seven the Bot API defines | `Bad Request: unsupported command scope type` |
-| same | a chat scope has no `chat_id`, or one that is not an integer | `Bad Request: Invalid chat_id specified` |
-| same | a `chat_member` scope has no `user_id`, or one that is not an integer | `Bad Request: invalid user_id specified` |
+| `setMyCommands`, `getMyCommands`, `deleteMyCommands` | `scope` is not JSON / not a JSON object | `Bad Request: Can't parse BotCommandScope JSON object` / `Bad Request: Can't parse BotCommandScope: BotCommandScope must be an Object` |
+| same | `scope.type` is missing / not a string / not one of the seven the Bot API defines | `Bad Request: Can't parse BotCommandScope: Can't find field "type"` / `...: Field "type" must be of type String` / `...: Unsupported type specified` |
+| same | a chat scope has no `chat_id` / an empty one | `Bad Request: Can't parse BotCommandScope: Can't find field "chat_id"` / `...: Empty chat_id specified` |
+| same | a `chat_member` scope has no `user_id` / one that is not an integer / one that is not positive | `Bad Request: Can't parse BotCommandScope: Can't find field "user_id"` / `...: Field "user_id" must be a valid Number` / `...: Invalid user_id specified` |
+| same | a chat scope names a username that is not a configured group or channel, or chat 0 | `Bad Request: chat not found` |
+| same | a `chat_administrators` or `chat_member` scope names a private chat / a scope names a channel | `Bad Request: Can't use specified scope in private chats` / `Bad Request: Can't change commands in channel chats` |
+| same | `language_code` is neither empty nor two lower-case Latin letters | `Bad Request: Invalid language code specified` |
 | `sendMessage`, `sendPhoto`, `sendDocument`, `editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `sendChatAction`, `sendRichMessage`, `sendRichMessageDraft` | `chat_id` is missing, zero or not an integer | `Bad Request: chat_id is empty` |
 | `sendMessage`, `editMessageText` | `text` is empty | `Bad Request: message text is empty` |
 | `sendMessage`, `editMessageText` | `text` is over 4096 characters | `Bad Request: message is too long` |
@@ -222,16 +225,19 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | `answerCallbackQuery` | `callback_query_id` is empty | `Bad Request: callback_query_id is empty` |
 | same | the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
 | `sendInvoice` | `chat_id` is missing, zero or not an integer | `Bad Request: chat_id is empty` |
-| same | `title`, `description` or `currency` is empty | `Bad Request: title is empty` / `description is empty` / `currency is empty` |
-| same | `title` or `description` is past the length above | `Bad Request: title is too long` / `description is too long` |
-| same | `payload` is empty or over 128 bytes | `Bad Request: payload is empty` / `Bad Request: payload is too long` |
-| same | `prices` is missing, not a JSON array, empty or over 100 items | `Bad Request: can't parse prices JSON object` / `prices are empty` / `too many prices specified` |
-| same | a price `amount` is negative | `Bad Request: prices are invalid` |
+| same | `title`, `description`, `payload`, `currency` or `prices` is empty, checked in that order | `Bad Request: Parameter "<name>" is required` |
+| same | `payload` is not UTF-8 | `Bad Request: The payload must be encoded in UTF-8` |
+| same | `prices` is not JSON / not an array | `Bad Request: Can't parse prices JSON object` / `Bad Request: Expected an Array of LabeledPrice` |
+| same | a price is not an object, has no or an empty `label`, or no `amount` | `Bad Request: Can't parse LabeledPrice: LabeledPrice must be an Object` / `...: Can't find field "label"` / `...: LabeledPrice label must be non-empty` / `...: Can't find field "amount"` |
+| same | an `amount` is not an integer (a number or a string of digits) | `Bad Request: Can't parse LabeledPrice: Field "amount" must be a valid Number` |
+| same | `prices` is an empty array | `Bad Request: There must be at least one price part` |
+| same | an `amount` is past 999999999999 either way | `Bad Request: Too big amount of the currency specified` |
+| same | the total of the prices is zero or negative / past 999999999999 | `Bad Request: Total price must be positive` / `Bad Request: Total price is too big` |
+| same | `title`, `description` or `payload` is past the length above | `Bad Request: title is too long` / `description is too long` / `payload is too long` |
 | same | `currency` is `XTR` and `prices` does not hold exactly one item | `Bad Request: prices must contain exactly one item` |
 | same | a keyboard does not lead with a Pay button | `Bad Request: BUTTON_TYPE_INVALID` |
-| `answerPreCheckoutQuery` | `pre_checkout_query_id` is empty | `Bad Request: pre_checkout_query_id is empty` |
-| same | the stand never issued the query, it was minted before a reset, or it was already answered | The query error above. |
-| same | `ok` is not true and `error_message` is empty | `Bad Request: error_message is empty` |
+| `answerPreCheckoutQuery` | `ok` is not true and `error_message` is empty | `Bad Request: Parameter "error_message" is required` |
+| same | `pre_checkout_query_id` is empty, the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
 | `sendRichMessage` | `rich_message` is not a JSON object with a non-empty `markdown` or `html` | `Bad Request: can't parse rich_message JSON object` |
 | `sendRichMessageDraft` | `draft_id` is missing, zero or not an integer | `Bad Request: draft_id must be a non-zero integer` |
 | same | `rich_message` is missing or not a JSON object | `Bad Request: can't parse rich_message JSON object` |
@@ -264,7 +270,7 @@ Additional refusals for the extended methods:
 | `setWebhook` | malformed URL / external HTTP / unsupported external port | `Bad Request: invalid webhook URL specified` / `Bad Request: bad webhook: An HTTPS URL must be provided for webhook` / `Bad Request: bad webhook: Webhook can be set up only on ports 80, 88, 443 or 8443` |
 | `setWebhook` | secret over 256 bytes / characters outside A-Z, a-z, 0-9, `_`, `-` | `Bad Request: secret token is too long` / `Bad Request: secret token contains illegal characters` |
 
-The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate decoding failures currently use `Bad Request: invalid certificate` rather than OpenSSL's platform-specific diagnostic, and the invoice field refusals above use the wording of the Bot API's own constraints rather than a captured answer; these are deliberate validation approximations. Delivery/network diagnostics come from Go's HTTP client. Advanced parameters not listed here are recorded without affecting state.
+The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate decoding failures currently use `Bad Request: invalid certificate` rather than OpenSSL's platform-specific diagnostic, and the length and Telegram Stars refusals of `sendInvoice` above use the wording of the Bot API's own constraints rather than a captured answer; these are deliberate validation approximations. Delivery/network diagnostics come from Go's HTTP client. Advanced parameters not listed here are recorded without affecting state.
 
 ## Not implemented
 

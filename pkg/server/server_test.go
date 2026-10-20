@@ -955,3 +955,16 @@ func TestGetMyCommandsBeforeAnySetIsAnEmptyList(t *testing.T) {
 		t.Fatalf("getMyCommands = %#v, want []", body["result"])
 	}
 }
+
+// A Boolean parameter reads the way the Bot API server reads it, whatever
+// spelling of true a library sends.
+func TestTruthy_ReadsBooleansAsTheBotAPIServer(t *testing.T) {
+	for value, want := range map[string]bool{
+		"true": true, "True": true, " TRUE ": true, "yes": true, "1": true,
+		"": false, "false": false, "0": false, "no": false, "on": false,
+	} {
+		if got := truthy(value); got != want {
+			t.Errorf("truthy(%q) = %v, want %v", value, got, want)
+		}
+	}
+}

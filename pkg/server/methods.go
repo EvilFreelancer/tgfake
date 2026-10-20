@@ -269,7 +269,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 		ReplyToMessage: quoted,
 	}
 	msg.ReplyMarkup = markup
-	msg.HasProtectedContent = params.Get("protect_content") == "true"
+	msg.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
 	result := stored.clone()
 	s.mu.Unlock()
@@ -404,7 +404,7 @@ func (s *Server) answerCallbackQuery(w http.ResponseWriter, method string, param
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: callback_query_id is empty", 0)
 		return
 	}
-	answer := CallbackAnswer{ID: id, Text: params.Get("text"), ShowAlert: params.Get("show_alert") == "true"}
+	answer := CallbackAnswer{ID: id, Text: params.Get("text"), ShowAlert: truthy(params.Get("show_alert"))}
 	s.mu.Lock()
 	// The query names no chat; the tap that minted it does. A query the fake
 	// never issued, one minted before a Reset and one already answered are
@@ -469,7 +469,7 @@ func (s *Server) sendRichMessage(w http.ResponseWriter, method string, params ur
 		ReplyToMessage: quoted,
 		ReplyMarkup:    markup,
 	}
-	msg.HasProtectedContent = params.Get("protect_content") == "true"
+	msg.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(msg, true, "", true)
 	result := stored.clone()
 	s.mu.Unlock()
@@ -505,8 +505,8 @@ func (s *Server) sendRichMessageDraft(w http.ResponseWriter, method string, para
 	d.updatedAt = now
 	d.revisions++
 	d.threadID = atoi(params.Get("message_thread_id"))
-	d.canStop = params.Get("can_stop") == "true"
-	d.keepOnStop = params.Get("keep_on_stop") == "true"
+	d.canStop = truthy(params.Get("can_stop"))
+	d.keepOnStop = truthy(params.Get("keep_on_stop"))
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)
 }
@@ -548,6 +548,17 @@ func chatIDOf(params url.Values) (int64, bool) {
 	return id, err == nil && id != 0
 }
 
+// truthy reads a Boolean parameter the way the Bot API server does: "true",
+// "yes" or "1" in any case and with surrounding spaces is true, anything else
+// is false. Libraries differ in how they spell true ("true", "True", "1").
+func truthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "1":
+		return true
+	}
+	return false
+}
+
 // messageTextMax is Telegram's limit on the text of one message, in
 // characters: what makes a bot split a long answer, and what a fake that
 // accepted any length would let a streaming path get wrong unnoticed.
@@ -570,7 +581,7 @@ func replyTargetLocked(chat *chatState, params url.Values) (*botapi.Message, str
 		}
 	} else {
 		reply.MessageID = atoi(params.Get("reply_to_message_id"))
-		reply.AllowSendingWithoutReply = params.Get("allow_sending_without_reply") == "true"
+		reply.AllowSendingWithoutReply = truthy(params.Get("allow_sending_without_reply"))
 	}
 	if reply.MessageID == 0 {
 		return nil, ""

@@ -26,11 +26,11 @@ import (
 //	successful_payment        a service message in the chat
 //	refunded_payment          a service message in the chat
 
-// priceMax is the number of prices Telegram takes in one invoice, and
-// xtrCurrency is the code of Telegram Stars.
+// xtrCurrency is the code of Telegram Stars, and amountMax the largest
+// amount, in the smallest units of a currency, Telegram takes in a price.
 const (
-	priceMax    = 100
 	xtrCurrency = "XTR"
+	amountMax   = 999_999_999_999
 )
 
 // invoice field limits, as the Bot API states them for sendInvoice.
@@ -59,8 +59,8 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 	if problem == "" {
 		prices, problem = parsePrices(params.Get("prices"))
 	}
-	if problem == "" && params.Get("currency") == xtrCurrency {
-		problem = xtrNeedsOnePrice(prices)
+	if problem == "" {
+		problem = invoiceLimitProblem(params, prices)
 	}
 	markup := (*botapi.InlineKeyboardMarkup)(nil)
 	if problem == "" {
@@ -95,7 +95,6 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 		From:           s.botUser(),
 		Chat:           chat.wire(),
 		Date:           s.now().Unix(),
-		Caption:        "",
 		ReplyToMessage: quoted,
 		ReplyMarkup:    markup,
 		Invoice: &botapi.Invoice{
@@ -105,7 +104,7 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 			Currency:       params.Get("currency"),
 			TotalAmount:    total,
 		},
-		HasProtectedContent: params.Get("protect_content") == "true",
+		HasProtectedContent: truthy(params.Get("protect_content")),
 	}
 	stored := chat.appendLocked(msg, true, "", false)
 	stored.invoicePayload = params.Get("payload")
@@ -114,55 +113,90 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 	s.writeResult(w, method, params, result)
 }
 
-// invoiceFieldProblem refuses an invoice Telegram would not send: a required
-// field with nothing in it or past the length the Bot API states. It returns
-// the description, or "" for an invoice the stand takes.
+// invoiceRequired are the parameters of sendInvoice the Bot API server
+// refuses to go without, in the order it reads them.
+var invoiceRequired = []string{"title", "description", "payload", "currency", "prices"}
+
+// invoiceFieldProblem refuses an invoice the Bot API server does not read: a
+// required parameter with nothing in it, or a payload that is not UTF-8. It
+// returns the description, or "" for an invoice the stand takes.
 func invoiceFieldProblem(params url.Values) string {
-	if utf8.RuneCountInString(params.Get("title")) == 0 {
-		return "Bad Request: title is empty"
-	}
-	if utf8.RuneCountInString(params.Get("title")) > invoiceTitleMax {
-		return "Bad Request: title is too long"
-	}
-	if utf8.RuneCountInString(params.Get("description")) == 0 {
-		return "Bad Request: description is empty"
-	}
-	if utf8.RuneCountInString(params.Get("description")) > invoiceDescriptionMax {
-		return "Bad Request: description is too long"
-	}
-	if params.Get("payload") == "" {
-		return "Bad Request: payload is empty"
-	}
-	if len(params.Get("payload")) > invoicePayloadMax {
-		return "Bad Request: payload is too long"
-	}
-	if params.Get("currency") == "" {
-		return "Bad Request: currency is empty"
+	for _, name := range invoiceRequired {
+		if params.Get(name) == "" {
+			return `Bad Request: Parameter "` + name + `" is required`
+		}
+		if name == "payload" && !utf8.ValidString(params.Get(name)) {
+			return "Bad Request: The payload must be encoded in UTF-8"
+		}
 	}
 	return ""
 }
 
-// parsePrices reads the prices of an invoice: a JSON array of LabeledPrice,
-// not empty, no more than priceMax of them, none of a negative amount, and
-// exactly one for Telegram Stars.
-func parsePrices(raw string) ([]botapi.LabeledPrice, string) {
-	if strings.TrimSpace(raw) == "" {
-		return nil, "Bad Request: can't parse prices JSON object"
+// invoiceLimitProblem refuses an invoice past the limits the Bot API states
+// for sendInvoice: the length of the title, the description and the payload,
+// and exactly one price for Telegram Stars. Telegram's own words for these are
+// not known, so the stand uses the wording of the documented constraint.
+func invoiceLimitProblem(params url.Values, prices []botapi.LabeledPrice) string {
+	switch {
+	case utf8.RuneCountInString(params.Get("title")) > invoiceTitleMax:
+		return "Bad Request: title is too long"
+	case utf8.RuneCountInString(params.Get("description")) > invoiceDescriptionMax:
+		return "Bad Request: description is too long"
+	case len(params.Get("payload")) > invoicePayloadMax:
+		return "Bad Request: payload is too long"
+	case params.Get("currency") == xtrCurrency && len(prices) != 1:
+		return "Bad Request: prices must contain exactly one item"
 	}
-	var prices []botapi.LabeledPrice
-	if json.Unmarshal([]byte(raw), &prices) != nil {
-		return nil, "Bad Request: can't parse prices JSON object"
+	return ""
+}
+
+// parsePrices reads the prices of an invoice the way the Bot API server and
+// Telegram read them: a JSON array of LabeledPrice objects, each with a
+// non-empty label and an integer amount (a number or a string of digits).
+// A single amount may be negative, a discount, but the total has to be
+// positive. It returns the prices and the description of the refusal, if any.
+func parsePrices(raw string) ([]botapi.LabeledPrice, string) {
+	if !json.Valid([]byte(raw)) {
+		return nil, "Bad Request: Can't parse prices JSON object"
+	}
+	var items []json.RawMessage
+	if json.Unmarshal([]byte(raw), &items) != nil {
+		return nil, "Bad Request: Expected an Array of LabeledPrice"
+	}
+	prices := make([]botapi.LabeledPrice, 0, len(items))
+	for _, item := range items {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(item, &fields) != nil || fields == nil {
+			return nil, "Bad Request: Can't parse LabeledPrice: LabeledPrice must be an Object"
+		}
+		label, problem := jsonStringField(fields, "label")
+		if problem == "" && label == "" {
+			problem = "LabeledPrice label must be non-empty"
+		}
+		if problem != "" {
+			return nil, "Bad Request: Can't parse LabeledPrice: " + problem
+		}
+		amount, problem := jsonIntegerField(fields, "amount")
+		if problem != "" {
+			return nil, "Bad Request: Can't parse LabeledPrice: " + problem
+		}
+		prices = append(prices, botapi.LabeledPrice{Label: label, Amount: amount})
 	}
 	if len(prices) == 0 {
-		return nil, "Bad Request: prices are empty"
+		return nil, "Bad Request: There must be at least one price part"
 	}
-	if len(prices) > priceMax {
-		return nil, "Bad Request: too many prices specified"
-	}
+	var total int64
 	for _, p := range prices {
-		if p.Amount < 0 {
-			return nil, "Bad Request: prices are invalid"
+		if p.Amount < -amountMax || p.Amount > amountMax {
+			return nil, "Bad Request: Too big amount of the currency specified"
 		}
+		total += p.Amount
+	}
+	if total <= 0 {
+		return nil, "Bad Request: Total price must be positive"
+	}
+	if total > amountMax {
+		return nil, "Bad Request: Total price is too big"
 	}
 	return prices, ""
 }
@@ -181,38 +215,25 @@ func invoiceKeyboardProblem(markup *botapi.InlineKeyboardMarkup) string {
 	return ""
 }
 
-// xtrNeedsOnePrice is the refusal of an invoice in Telegram Stars whose prices
-// are not exactly one item, which is what the Bot API requires.
-func xtrNeedsOnePrice(prices []botapi.LabeledPrice) string {
-	if len(prices) != 1 {
-		return "Bad Request: prices must contain exactly one item"
-	}
-	return ""
-}
-
 func (s *Server) answerPreCheckoutQuery(w http.ResponseWriter, method string, params url.Values) {
-	id := params.Get("pre_checkout_query_id")
-	if id == "" {
-		s.writeError(w, method, params, 400, "Bad Request: pre_checkout_query_id is empty", 0)
-		return
-	}
-	ok := params.Get("ok") == "true"
+	ok := truthy(params.Get("ok"))
 	if !ok && params.Get("error_message") == "" {
-		s.writeError(w, method, params, 400, "Bad Request: error_message is empty", 0)
+		s.writeError(w, method, params, 400, `Bad Request: Parameter "error_message" is required`, 0)
 		return
 	}
 	s.mu.Lock()
 	// The query names no chat; the tap that minted it does. A query the stand
-	// never issued, one minted before a reset and one already answered are
-	// refused the way Telegram refuses an answer to a query it does not know.
-	pending := s.preCheckouts[id]
+	// never issued, an empty id, one minted before a reset and one already
+	// answered are refused the way Telegram refuses an answer to a query it
+	// does not know.
+	pending := s.preCheckouts[params.Get("pre_checkout_query_id")]
 	if pending == nil {
 		s.mu.Unlock()
 		s.writeError(w, method, params, 400,
 			"Bad Request: query is too old and response timeout expired or query ID is invalid", 0)
 		return
 	}
-	delete(s.preCheckouts, id)
+	delete(s.preCheckouts, params.Get("pre_checkout_query_id"))
 	if ok {
 		s.chargeLocked(pending)
 	}

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+
+	"github.com/EvilFreelancer/tgfake/pkg/botapi"
 )
 
 func TestSetMyCommands_Refusals(t *testing.T) {
@@ -17,16 +19,36 @@ func TestSetMyCommands_Refusals(t *testing.T) {
 			"Bad Request: can't parse commands JSON object"},
 		{"no commands", url.Values{},
 			"Bad Request: can't parse commands JSON object"},
+		{"a scope that is not JSON", url.Values{"commands": {`[]`}, "scope": {`{type:chat}`}},
+			"Bad Request: Can't parse BotCommandScope JSON object"},
+		{"a scope that is not an object", url.Values{"commands": {`[]`}, "scope": {`["chat"]`}},
+			"Bad Request: Can't parse BotCommandScope: BotCommandScope must be an Object"},
 		{"a scope of no known type", url.Values{"commands": {`[]`}, "scope": {`{"type":"everyone"}`}},
-			"Bad Request: unsupported command scope type"},
+			"Bad Request: Can't parse BotCommandScope: Unsupported type specified"},
 		{"a scope with no type", url.Values{"commands": {`[]`}, "scope": {`{"chat_id":1}`}},
-			"Bad Request: unsupported command scope type"},
+			`Bad Request: Can't parse BotCommandScope: Can't find field "type"`},
+		{"a scope whose type is not a string", url.Values{"commands": {`[]`}, "scope": {`{"type":true}`}},
+			`Bad Request: Can't parse BotCommandScope: Field "type" must be of type String`},
 		{"a chat scope with no chat", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat"}`}},
-			"Bad Request: Invalid chat_id specified"},
+			`Bad Request: Can't parse BotCommandScope: Can't find field "chat_id"`},
+		{"a chat scope with an empty chat", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat","chat_id":""}`}},
+			"Bad Request: Can't parse BotCommandScope: Empty chat_id specified"},
 		{"a chat scope naming a username", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat","chat_id":"@alice"}`}},
-			"Bad Request: Invalid chat_id specified"},
+			"Bad Request: chat not found"},
 		{"a chat_member scope with no user", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_member","chat_id":-100}`}},
-			"Bad Request: invalid user_id specified"},
+			`Bad Request: Can't parse BotCommandScope: Can't find field "user_id"`},
+		{"a chat_member scope with a user that is not a number", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_member","chat_id":-100,"user_id":"alice"}`}},
+			`Bad Request: Can't parse BotCommandScope: Field "user_id" must be a valid Number`},
+		{"a chat_member scope with user 0", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_member","chat_id":-100,"user_id":0}`}},
+			"Bad Request: Can't parse BotCommandScope: Invalid user_id specified"},
+		{"an administrators scope of a private chat", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_administrators","chat_id":4242}`}},
+			"Bad Request: Can't use specified scope in private chats"},
+		{"a member scope of a private chat", url.Values{"commands": {`[]`}, "scope": {`{"type":"chat_member","chat_id":4242,"user_id":4242}`}},
+			"Bad Request: Can't use specified scope in private chats"},
+		{"a language that is not two letters", url.Values{"commands": {`[]`}, "language_code": {"eng"}},
+			"Bad Request: Invalid language code specified"},
+		{"a language in capitals", url.Values{"commands": {`[]`}, "language_code": {"EN"}},
+			"Bad Request: Invalid language code specified"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -43,13 +65,46 @@ func TestSetMyCommands_Refusals(t *testing.T) {
 
 func TestGetMyCommands_RefusesTheSameScopes(t *testing.T) {
 	s := newStand(t, Options{})
-	status, body := s.call("getMyCommands", url.Values{"scope": {`{"type":"chat"}`}})
-	if status != http.StatusBadRequest || body["description"] != "Bad Request: Invalid chat_id specified" {
-		t.Fatalf("getMyCommands: %d %v", status, body)
+	for _, method := range []string{"getMyCommands", "deleteMyCommands"} {
+		status, body := s.call(method, url.Values{"scope": {`{"type":"chat"}`}})
+		if status != http.StatusBadRequest || body["description"] != `Bad Request: Can't parse BotCommandScope: Can't find field "chat_id"` {
+			t.Fatalf("%s with no chat: %d %v", method, status, body)
+		}
+		status, body = s.call(method, url.Values{"language_code": {"english"}})
+		if status != http.StatusBadRequest || body["description"] != "Bad Request: Invalid language code specified" {
+			t.Fatalf("%s with a bad language: %d %v", method, status, body)
+		}
 	}
-	status, body = s.call("deleteMyCommands", url.Values{"scope": {`{"type":"chat"}`}})
-	if status != http.StatusBadRequest || body["description"] != "Bad Request: Invalid chat_id specified" {
-		t.Fatalf("deleteMyCommands: %d %v", status, body)
+}
+
+// A scope reads the way the Bot API server reads it: chat_id as a number, a
+// string of digits or the @username of a group, user_id as a number or a
+// string of digits.
+func TestSetMyCommands_ReadsIdsAsNumbersOrStrings(t *testing.T) {
+	s := newStand(t, Options{})
+	if status, body := s.sim("POST", "/sim/chat/configure", map[string]any{
+		"chat": map[string]any{"id": -100, "type": "supergroup", "title": "Group", "username": "team"},
+	}); status != http.StatusOK {
+		t.Fatalf("configure: %d %v", status, body)
+	}
+	if status, body := s.call("setMyCommands", url.Values{
+		"commands": {`[{"command":"kick","description":"Kick"}]`},
+		"scope":    {`{"type":"chat_member","chat_id":"-100","user_id":"4243"}`},
+	}); status != http.StatusOK {
+		t.Fatalf("setMyCommands: %d %v", status, body)
+	}
+	_, body := s.call("getMyCommands", url.Values{"scope": {`{"type":"chat_member","chat_id":-100,"user_id":4243}`}})
+	if list, _ := body["result"].([]any); len(list) != 1 {
+		t.Fatalf("getMyCommands: %v", body)
+	}
+	if status, body := s.call("setMyCommands", url.Values{
+		"commands": {`[{"command":"rules","description":"Rules"}]`},
+		"scope":    {`{"type":"chat","chat_id":"@team"}`},
+	}); status != http.StatusOK {
+		t.Fatalf("setMyCommands by username: %d %v", status, body)
+	}
+	if got := s.fake.CommandsFor(botapi.BotCommandScope{Type: "chat", ChatID: -100}, ""); len(got) != 1 || got[0].Command != "rules" {
+		t.Fatalf("the group's list by its id: %v", got)
 	}
 }
 
@@ -196,8 +251,8 @@ func TestCommandsFor_AdministratorScopesServeAdministrators(t *testing.T) {
 		t.Fatalf("administrators scope after deleting the chat's list: %q", got)
 	}
 	// A private chat has no administrator scopes in its chain at all.
-	if got := shown(`{"type":"chat_member","chat_id":4242,"user_id":4242}`); got != "default" {
-		t.Fatalf("private chat: %q", got)
+	if got := s.fake.CommandsFor(botapi.BotCommandScope{Type: "chat", ChatID: 4242}, ""); len(got) != 1 || got[0].Command != "default" {
+		t.Fatalf("private chat: %v", got)
 	}
 }
 

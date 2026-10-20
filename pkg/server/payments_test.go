@@ -30,22 +30,29 @@ func TestSendInvoice_Refusals(t *testing.T) {
 		want   string
 	}{
 		{"no chat", func(f url.Values) { f.Del("chat_id") }, "Bad Request: chat_id is empty"},
-		{"empty title", func(f url.Values) { f.Set("title", "") }, "Bad Request: title is empty"},
+		{"empty title", func(f url.Values) { f.Set("title", "") }, `Bad Request: Parameter "title" is required`},
 		{"title over 32 characters", func(f url.Values) { f.Set("title", strings.Repeat("т", 33)) }, "Bad Request: title is too long"},
-		{"empty description", func(f url.Values) { f.Set("description", "") }, "Bad Request: description is empty"},
+		{"empty description", func(f url.Values) { f.Set("description", "") }, `Bad Request: Parameter "description" is required`},
 		{"description over 255 characters", func(f url.Values) { f.Set("description", strings.Repeat("a", 256)) }, "Bad Request: description is too long"},
-		{"empty payload", func(f url.Values) { f.Set("payload", "") }, "Bad Request: payload is empty"},
+		{"empty payload", func(f url.Values) { f.Set("payload", "") }, `Bad Request: Parameter "payload" is required`},
+		{"a payload that is not UTF-8", func(f url.Values) { f.Set("payload", "\xff") }, "Bad Request: The payload must be encoded in UTF-8"},
 		{"payload over 128 bytes", func(f url.Values) { f.Set("payload", strings.Repeat("я", 65)) }, "Bad Request: payload is too long"},
-		{"empty currency", func(f url.Values) { f.Set("currency", "") }, "Bad Request: currency is empty"},
-		{"no prices", func(f url.Values) { f.Del("prices") }, "Bad Request: can't parse prices JSON object"},
-		{"prices not a list", func(f url.Values) { f.Set("prices", `{"amount":1}`) }, "Bad Request: can't parse prices JSON object"},
-		{"no price in the list", func(f url.Values) { f.Set("prices", `[]`) }, "Bad Request: prices are empty"},
-		{"over 100 prices", func(f url.Values) {
-			items := strings.Repeat(`{"label":"x","amount":1},`, 101)
-			f.Set("prices", "["+strings.TrimSuffix(items, ",")+"]")
-		}, "Bad Request: too many prices specified"},
-		{"a negative amount", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":-1}]`) }, "Bad Request: prices are invalid"},
-		{"Stars with no price", func(f url.Values) { f.Set("prices", `[]`) }, "Bad Request: prices are empty"},
+		{"empty currency", func(f url.Values) { f.Set("currency", "") }, `Bad Request: Parameter "currency" is required`},
+		{"no prices", func(f url.Values) { f.Del("prices") }, `Bad Request: Parameter "prices" is required`},
+		{"prices that are not JSON", func(f url.Values) { f.Set("prices", `[{amount:1}]`) }, "Bad Request: Can't parse prices JSON object"},
+		{"prices not a list", func(f url.Values) { f.Set("prices", `{"amount":1}`) }, "Bad Request: Expected an Array of LabeledPrice"},
+		{"a price that is not an object", func(f url.Values) { f.Set("prices", `[150]`) }, "Bad Request: Can't parse LabeledPrice: LabeledPrice must be an Object"},
+		{"a price with no label", func(f url.Values) { f.Set("prices", `[{"amount":150}]`) }, `Bad Request: Can't parse LabeledPrice: Can't find field "label"`},
+		{"a price with an empty label", func(f url.Values) { f.Set("prices", `[{"label":"","amount":150}]`) }, "Bad Request: Can't parse LabeledPrice: LabeledPrice label must be non-empty"},
+		{"a price with no amount", func(f url.Values) { f.Set("prices", `[{"label":"x"}]`) }, `Bad Request: Can't parse LabeledPrice: Can't find field "amount"`},
+		{"an amount that is not a number", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":"lots"}]`) }, `Bad Request: Can't parse LabeledPrice: Field "amount" must be a valid Number`},
+		{"no price in the list", func(f url.Values) { f.Set("prices", `[]`) }, "Bad Request: There must be at least one price part"},
+		{"an amount past the largest", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":1000000000000}]`) }, "Bad Request: Too big amount of the currency specified"},
+		{"a total of zero", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":0}]`) }, "Bad Request: Total price must be positive"},
+		{"a discount past the price", func(f url.Values) {
+			f.Set("currency", "USD")
+			f.Set("prices", `[{"label":"Fee","amount":100},{"label":"Discount","amount":-150}]`)
+		}, "Bad Request: Total price must be positive"},
 		{"Stars with two prices", func(f url.Values) {
 			f.Set("prices", `[{"label":"a","amount":1},{"label":"b","amount":2}]`)
 		}, "Bad Request: prices must contain exactly one item"},
@@ -65,6 +72,22 @@ func TestSendInvoice_Refusals(t *testing.T) {
 				t.Fatal("a refused invoice must not reach the chat")
 			}
 		})
+	}
+}
+
+// A price line may be negative, a discount, as long as the total is not; an
+// amount may come as a string of digits, as the Bot API server reads it.
+func TestSendInvoice_TakesADiscountLine(t *testing.T) {
+	s := newStand(t, Options{})
+	form := starsInvoiceForm()
+	form.Set("currency", "USD")
+	form.Set("prices", `[{"label":"Fee","amount":"200"},{"label":"Discount","amount":-50}]`)
+	status, body := s.call("sendInvoice", form)
+	if status != http.StatusOK {
+		t.Fatalf("sendInvoice: %d %v", status, body)
+	}
+	if invoice := result(t, body)["invoice"].(map[string]any); invoice["total_amount"] != float64(150) {
+		t.Fatalf("invoice: %v", invoice)
 	}
 }
 
@@ -100,7 +123,8 @@ func TestSendInvoice_RecordsWhatTheBotGaveIt(t *testing.T) {
 func TestAnswerPreCheckoutQuery_Refusals(t *testing.T) {
 	s := newStand(t, Options{})
 	status, body := s.call("answerPreCheckoutQuery", url.Values{"ok": {"true"}})
-	if status != http.StatusBadRequest || body["description"] != "Bad Request: pre_checkout_query_id is empty" {
+	if status != http.StatusBadRequest ||
+		body["description"] != "Bad Request: query is too old and response timeout expired or query ID is invalid" {
 		t.Fatalf("no id: %d %v", status, body)
 	}
 	status, body = s.call("answerPreCheckoutQuery", url.Values{
@@ -113,8 +137,27 @@ func TestAnswerPreCheckoutQuery_Refusals(t *testing.T) {
 	status, body = s.call("answerPreCheckoutQuery", url.Values{
 		"pre_checkout_query_id": {"pcq-1"}, "ok": {"false"},
 	})
-	if status != http.StatusBadRequest || body["description"] != "Bad Request: error_message is empty" {
+	if status != http.StatusBadRequest || body["description"] != `Bad Request: Parameter "error_message" is required` {
 		t.Fatalf("a refusal with no message: %d %v", status, body)
+	}
+}
+
+// ok is read the way the Bot API server reads a Boolean: a library that
+// spells it "True" confirms the pre-checkout, it does not refuse it.
+func TestAnswerPreCheckoutQuery_ReadsOkAsTelegramDoes(t *testing.T) {
+	s := newStand(t, Options{})
+	if status, body := s.call("sendInvoice", starsInvoiceForm()); status != http.StatusOK {
+		t.Fatalf("sendInvoice: %d %v", status, body)
+	}
+	if status, body := s.sim("POST", "/sim/invoice/pay", map[string]any{"chat_id": 4242}); status != http.StatusOK {
+		t.Fatalf("pay: %d %v", status, body)
+	}
+	status, body := s.call("answerPreCheckoutQuery", url.Values{"pre_checkout_query_id": {"pcq-1"}, "ok": {"True"}})
+	if status != http.StatusOK {
+		t.Fatalf("answerPreCheckoutQuery ok=True: %d %v", status, body)
+	}
+	if paid := successfulPayment(s); paid == nil || paid.TotalAmount != 150 {
+		t.Fatalf("a confirmed pre-checkout takes the money: %v", paid)
 	}
 }
 

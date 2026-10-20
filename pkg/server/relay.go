@@ -153,7 +153,7 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 		copy := original.clone()
 		copy.MessageID, copy.Date, copy.EditDate = 0, s.now().Unix(), 0
 		copy.From, copy.Chat, copy.ReplyToMessage = s.botUser(), chat.wire(), quoted
-		copy.HasProtectedContent = params.Get("protect_content") == "true"
+		copy.HasProtectedContent = truthy(params.Get("protect_content"))
 		copy.MediaGroupID = ""
 		if bulk && original.msg.MediaGroupID != "" {
 			if groups[original.msg.MediaGroupID] == "" {
@@ -172,7 +172,7 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 			if _, present := params["caption"]; present {
 				copy.Caption = params.Get("caption")
 			}
-			if params.Get("remove_caption") == "true" {
+			if truthy(params.Get("remove_caption")) {
 				copy.Caption = ""
 			}
 		}
@@ -248,7 +248,7 @@ func (s *Server) sendContent(w http.ResponseWriter, method string, params url.Va
 		return
 	}
 	message.From, message.Chat, message.Date, message.ReplyToMessage, message.ReplyMarkup = s.botUser(), chat.wire(), s.now().Unix(), quoted, markup
-	message.HasProtectedContent = params.Get("protect_content") == "true"
+	message.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(message, true, "", false)
 	result := stored.clone()
 	s.mu.Unlock()

@@ -325,7 +325,7 @@ func (s *Server) answerInline(w http.ResponseWriter, req *http.Request, method s
 		s.nextInline++
 		id := "prepared-" + strconv.Itoa(s.nextInline)
 		expires := s.now().Add(5 * time.Minute).Unix()
-		s.prepared[id] = preparedMessage{result: json.RawMessage(params.Get("result")), userID: userID, expires: expires, userChats: params.Get("allow_user_chats") == "true", botChats: params.Get("allow_bot_chats") == "true", groups: params.Get("allow_group_chats") == "true", channels: params.Get("allow_channel_chats") == "true"}
+		s.prepared[id] = preparedMessage{result: json.RawMessage(params.Get("result")), userID: userID, expires: expires, userChats: truthy(params.Get("allow_user_chats")), botChats: truthy(params.Get("allow_bot_chats")), groups: truthy(params.Get("allow_group_chats")), channels: truthy(params.Get("allow_channel_chats"))}
 		s.mu.Unlock()
 		s.writeResult(w, method, params, botapi.PreparedInlineMessage{ID: id, ExpirationDate: expires})
 		return

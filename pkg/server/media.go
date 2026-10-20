@@ -232,7 +232,7 @@ func (s *Server) sendMedia(w http.ResponseWriter, req *http.Request, method stri
 		params.Set(kind, fmt.Sprintf("%s (%d bytes)", f.name, len(f.data)))
 	}
 	f = s.keepFileLocked(f)
-	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: params.Get("caption"), ReplyToMessage: quoted, ReplyMarkup: markup, HasProtectedContent: params.Get("protect_content") == "true"}
+	msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: params.Get("caption"), ReplyToMessage: quoted, ReplyMarkup: markup, HasProtectedContent: truthy(params.Get("protect_content"))}
 	if kind == "video_note" {
 		msg.Caption = ""
 	}
@@ -347,7 +347,7 @@ func (s *Server) sendMediaGroup(w http.ResponseWriter, req *http.Request, method
 	result := make([]*botapi.Message, 0, len(items))
 	for i, item := range items {
 		f := s.keepFileLocked(files[i])
-		msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: item.Caption, ReplyToMessage: quoted, MediaGroupID: groupID, HasProtectedContent: params.Get("protect_content") == "true"}
+		msg := &botapi.Message{From: s.botUser(), Chat: chat.wire(), Date: s.now().Unix(), Caption: item.Caption, ReplyToMessage: quoted, MediaGroupID: groupID, HasProtectedContent: truthy(params.Get("protect_content"))}
 		attachFile(msg, f, item.params())
 		stored := chat.appendLocked(msg, true, item.ParseMode, false)
 		stored.file = f
