@@ -121,8 +121,8 @@ func (s *Server) simPayment(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if in.Kind != "" && !strings.EqualFold(in.Kind, "successful") && !strings.EqualFold(in.Kind, "refunded") {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "kind is successful or refunded"})
+	if problem := in.problem(); problem != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": problem})
 		return
 	}
 	upd, id, err := s.InjectPayment(in)

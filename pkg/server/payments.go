@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -66,7 +67,10 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 		markup, problem = parseKeyboard(params.Get("reply_markup"))
 	}
 	if problem == "" {
-		problem = validateKeyboard(markup, s.chatTypeLocked(chatID), true)
+		s.mu.Lock()
+		chatType := s.chatTypeLocked(chatID)
+		s.mu.Unlock()
+		problem = validateKeyboard(markup, chatType, true)
 	}
 	if problem == "" {
 		problem = invoiceKeyboardProblem(markup)
@@ -328,17 +332,36 @@ type IncomingPayment struct {
 	Username  string `json:"username,omitempty"`
 	FirstName string `json:"first_name,omitempty"`
 	// Kind is "successful" (the default) or "refunded".
-	Kind                  string `json:"kind,omitempty"`
-	Currency              string `json:"currency,omitempty"`
-	TotalAmount           int64  `json:"total_amount,omitempty"`
-	InvoicePayload        string `json:"invoice_payload,omitempty"`
-	TelegramPaymentCharge string `json:"telegram_payment_charge_id,omitempty"`
-	ProviderPaymentCharge string `json:"provider_payment_charge_id,omitempty"`
+	Kind                    string `json:"kind,omitempty"`
+	Currency                string `json:"currency,omitempty"`
+	TotalAmount             int64  `json:"total_amount,omitempty"`
+	InvoicePayload          string `json:"invoice_payload,omitempty"`
+	TelegramPaymentChargeID string `json:"telegram_payment_charge_id,omitempty"`
+	ProviderPaymentChargeID string `json:"provider_payment_charge_id,omitempty"`
+}
+
+// problem says why a payment cannot be delivered whatever the chat holds: a
+// kind the stand does not know, or a refund with no charge to return. It
+// returns "" for a payment the stand can deliver.
+func (in IncomingPayment) problem() string {
+	switch strings.ToLower(in.Kind) {
+	case "", "successful":
+		return ""
+	case "refunded":
+		if in.TelegramPaymentChargeID == "" {
+			return "telegram_payment_charge_id is required for a refund"
+		}
+		return ""
+	}
+	return "kind is successful or refunded"
 }
 
 // InjectPayment delivers a payment service message and returns the update id
 // and the message id.
 func (s *Server) InjectPayment(in IncomingPayment) (updateID, messageID int, err error) {
+	if problem := in.problem(); problem != "" {
+		return 0, 0, errors.New(problem)
+	}
 	if in.UserID == 0 {
 		in.UserID = defaultUserID
 	}
@@ -372,25 +395,22 @@ func (s *Server) InjectPayment(in IncomingPayment) (updateID, messageID int, err
 		in.InvoicePayload = invoice.invoicePayload
 	}
 	if strings.EqualFold(in.Kind, "refunded") {
-		if in.TelegramPaymentCharge == "" {
-			return 0, 0, fmt.Errorf("telegram_payment_charge_id is required for a refund")
-		}
 		refund := &botapi.RefundedPayment{
 			Currency:                in.Currency,
 			TotalAmount:             in.TotalAmount,
 			InvoicePayload:          in.InvoicePayload,
-			TelegramPaymentChargeID: in.TelegramPaymentCharge,
-			ProviderPaymentChargeID: in.ProviderPaymentCharge,
+			TelegramPaymentChargeID: in.TelegramPaymentChargeID,
+			ProviderPaymentChargeID: in.ProviderPaymentChargeID,
 		}
 		upd, id := s.appendPaymentLocked(in.ChatID, paymentUser(in), nil, refund)
 		return upd, id, nil
 	}
 	s.nextCharge++
-	charge := in.TelegramPaymentCharge
+	charge := in.TelegramPaymentChargeID
 	if charge == "" {
 		charge = "charge-" + strconv.Itoa(s.nextCharge)
 	}
-	provider := in.ProviderPaymentCharge
+	provider := in.ProviderPaymentChargeID
 	if provider == "" {
 		provider = "provider-charge-" + strconv.Itoa(s.nextCharge)
 	}

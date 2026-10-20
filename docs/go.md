@@ -46,7 +46,7 @@ t.Cleanup(func() {
 | `InjectCallback(in IncomingCallback) (updateID int, callbackID string, err error)` | The person taps a button, by `Label` or by `Data`; an error says why nothing could be tapped. |
 | `StopDraft(in DraftStop) (updateID int, err error)` | The person presses Stop under a draft streamed with `can_stop`; an error says why nothing could be stopped. |
 | `PayInvoice(in InvoicePay) (updateID int, queryID string, err error)` | The person starts paying an invoice; the answer is the `pre_checkout_query` it queued. No money moves until the bot confirms. |
-| `InjectPayment(in IncomingPayment) (updateID, messageID int, err error)` | A payment service message arrives: a `successful_payment`, or a `refunded_payment` when `Kind` says so. |
+| `InjectPayment(in IncomingPayment) (updateID, messageID int, err error)` | A payment service message arrives: a `successful_payment`, or a `refunded_payment` when `Kind` says so; an error says why nothing could be delivered. |
 | `LaunchWebApp(req WebAppLaunch) (LaunchedWebApp, error)` | The person opens a Mini App; the answer is the launch address and the signed launch data. |
 | `InjectMedia(in IncomingMedia) (int, int, error)` | Store incoming bytes and queue a message; JSON `Data` is base64, Go `Data` is `[]byte`. `MediaGroupID` makes it part of an album, `Mention` and `ReplyToMessageID` of the embedded `IncomingMessage` apply to the caption and the reply. |
 | `InjectInlineQuery(in IncomingInlineQuery) (int, string, error)` | Queue an inline query and return update/query ids. Requires `InlineMode`. |

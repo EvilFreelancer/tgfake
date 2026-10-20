@@ -240,13 +240,13 @@ A payment service message arrives without a pre-checkout this stand watched: a c
 | `telegram_payment_charge_id` | string | `charge-N` | The charge id. A refund cannot be delivered without one. |
 | `provider_payment_charge_id` | string | `provider-charge-N` | The provider's charge id. |
 
-A delivery that finds nothing to deliver is refused with `400` or `404` and one of these reasons:
+A delivery that cannot be made is refused with `400` or `404` and one of these reasons:
 
 | Error | When |
 |-------|------|
 | `kind is successful or refunded` (400) | `kind` is neither of the two. |
+| `telegram_payment_charge_id is required for a refund` (400) | A `refunded` payment arrived with no charge id to return. |
 | `chat <id> has no messages` (404) | The chat does not exist. |
-| `telegram_payment_charge_id is required for a refund` (404) | A `refunded` payment arrived with no charge id to return. |
 
 ```bash
 curl -s -X POST $O/sim/payment -d '{"chat_id": 4242, "kind": "refunded", "telegram_payment_charge_id": "charge-1"}'
@@ -334,6 +334,7 @@ typing…
 
 - Each message that is not deleted is one line, `[<message_id>] <who>: <text>`, where `<who>` is `bot`, the person's username, or `user` for a person with none.
 - A photo is shown as `[photo <file name> <width>x<height>]` and a document as `[document <file name>]`, each followed by its caption when it has one.
+- An invoice is shown as `[invoice <title> <total> <currency>] <description>`, a payment as `[payment <total> <currency>] <payload>` and a refund as `[refund <total> <currency>] <payload>`, the total in the smallest units of the currency.
 - The lines after the first of a multi-line text or caption are indented by four spaces.
 - Each row of a message's inline keyboard follows it on a line of its own: four spaces, then `[<button text>]` for each button, separated by spaces.
 - After the messages comes one line per live draft, `draft <draft_id> (rev <revisions>): <markdown>`, followed by a line `    [Stop]` when the draft shows a Stop button.

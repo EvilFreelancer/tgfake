@@ -2,8 +2,11 @@ package server
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -180,14 +183,73 @@ func TestPreCheckoutQuery_SubscriptionFiltersIt(t *testing.T) {
 	}
 }
 
-func TestInjectPayment_RefundsNeedAChargeID(t *testing.T) {
+func TestInjectPayment_Refusals(t *testing.T) {
 	s := newStand(t, Options{})
-	status, body := s.sim("POST", "/sim/payment", map[string]any{"chat_id": 4242, "kind": "refunded"})
-	if status != http.StatusNotFound {
-		t.Fatalf("refund with no charge id: %d %v", status, body)
+	// No chat yet: nothing to deliver the payment to.
+	status, body := s.sim("POST", "/sim/payment", map[string]any{"chat_id": 4242})
+	if status != http.StatusNotFound || body["error"] != "chat 4242 has no messages" {
+		t.Fatalf("no chat: %d %v", status, body)
 	}
-	status, body = s.sim("POST", "/sim/payment", map[string]any{"chat_id": 4242, "kind": "unknown"})
-	if status != http.StatusBadRequest {
-		t.Fatalf("unknown kind: %d %v", status, body)
+	if status, body := s.call("sendInvoice", starsInvoiceForm()); status != http.StatusOK {
+		t.Fatalf("sendInvoice: %d %v", status, body)
+	}
+	cases := []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{"a refund with no charge id", map[string]any{"chat_id": 4242, "kind": "refunded"},
+			"telegram_payment_charge_id is required for a refund"},
+		{"a kind the stand does not know", map[string]any{"chat_id": 4242, "kind": "pending"},
+			"kind is successful or refunded"},
+	}
+	for _, c := range cases {
+		status, body := s.sim("POST", "/sim/payment", c.body)
+		if status != http.StatusBadRequest || body["error"] != c.want {
+			t.Fatalf("%s: %d %v, want %q", c.name, status, body, c.want)
+		}
+	}
+	// The Go API refuses the same payments.
+	if _, _, err := s.fake.InjectPayment(IncomingPayment{Kind: "pending"}); err == nil || err.Error() != "kind is successful or refunded" {
+		t.Fatalf("InjectPayment with an unknown kind: %v", err)
+	}
+	if paid := successfulPayment(s); paid != nil {
+		t.Fatalf("a refused payment must not reach the chat: %v", paid)
+	}
+	for _, m := range s.fake.Chat(4242).Messages {
+		if m.RefundedPayment != nil {
+			t.Fatalf("a refused refund must not reach the chat: %v", m.RefundedPayment)
+		}
+	}
+}
+
+// sendInvoice reads the type of its chat under the lock: an invoice racing
+// the person's first message in another chat, which adds that chat, must not
+// read the chats map unguarded.
+func TestSendInvoice_SafeWhileAChatIsAdded(t *testing.T) {
+	fake := New(Options{})
+	defer fake.Close()
+	handler := fake.Handler()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := int64(0); i < 50; i++ {
+			fake.InjectMessage(IncomingMessage{ChatID: 10000 + i, UserID: 10000 + i, Text: "hi"})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			form := starsInvoiceForm()
+			form.Set("chat_id", strconv.Itoa(20000+i))
+			req := httptest.NewRequest(http.MethodPost, "/bot123456:TOKEN/sendInvoice", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+		}
+	}()
+	wg.Wait()
+	if got := len(fake.Calls("sendInvoice")); got != 50 {
+		t.Fatalf("sendInvoice calls: %d, want 50", got)
 	}
 }
