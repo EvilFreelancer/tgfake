@@ -332,8 +332,14 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 		}
 	}
 	newMarkup, problem := parseKeyboard(params.Get("reply_markup"))
+	invoice := target.msg.Invoice != nil
 	if problem == "" {
-		problem = validateKeyboard(newMarkup, target.msg.Chat.Type, false)
+		problem = validateKeyboard(newMarkup, target.msg.Chat.Type, invoice)
+	}
+	if problem == "" && invoice {
+		// An invoice keeps the rule sendInvoice applied: a keyboard leads
+		// with its Pay button.
+		problem = invoiceKeyboardProblem(newMarkup)
 	}
 	if problem != "" {
 		s.mu.Unlock()

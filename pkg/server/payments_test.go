@@ -115,7 +115,9 @@ func TestSendInvoice_RecordsWhatTheBotGaveIt(t *testing.T) {
 	if invoice["currency"] != "USD" || invoice["total_amount"] != float64(150) || invoice["title"] != "Premium" {
 		t.Fatalf("invoice: %v", invoice)
 	}
-	if invoice["start_parameter"] != nil {
+	// start_parameter is always on the wire Invoice, empty when the bot gave
+	// none, as Telegram writes it.
+	if parameter, present := invoice["start_parameter"]; !present || parameter != "" {
 		t.Fatalf("start_parameter: %v", invoice)
 	}
 }
@@ -294,5 +296,75 @@ func TestSendInvoice_SafeWhileAChatIsAdded(t *testing.T) {
 	wg.Wait()
 	if got := len(fake.Calls("sendInvoice")); got != 50 {
 		t.Fatalf("sendInvoice calls: %d, want 50", got)
+	}
+}
+
+// A forwarded invoice is still the bot's invoice: paying the forward asks the
+// bot about the payload it gave sendInvoice.
+func TestPayInvoice_AForwardKeepsThePayload(t *testing.T) {
+	s := newStand(t, Options{})
+	if status, body := s.call("sendInvoice", starsInvoiceForm()); status != http.StatusOK {
+		t.Fatalf("sendInvoice: %d %v", status, body)
+	}
+	if status, body := s.call("forwardMessage", url.Values{"chat_id": {"4243"}, "from_chat_id": {"4242"}, "message_id": {"1"}}); status != http.StatusOK {
+		t.Fatalf("forwardMessage: %d %v", status, body)
+	}
+	if _, _, err := s.fake.PayInvoice(InvoicePay{ChatID: 4243, UserID: 4243}); err != nil {
+		t.Fatalf("PayInvoice: %v", err)
+	}
+	_, body := s.call("getUpdates", nil)
+	batch := updates(t, body)
+	query, ok := batch[len(batch)-1]["pre_checkout_query"].(map[string]any)
+	if !ok || query["invoice_payload"] != "order-7" {
+		t.Fatalf("pre_checkout_query of the forward: %v", batch)
+	}
+}
+
+// An edit of an invoice's keyboard keeps the rule sendInvoice applied: the
+// Pay button may stay and has to lead.
+func TestEditMessageReplyMarkup_KeepsTheInvoiceRule(t *testing.T) {
+	s := newStand(t, Options{})
+	form := starsInvoiceForm()
+	form.Set("reply_markup", `{"inline_keyboard":[[{"text":"Pay","pay":true}]]}`)
+	if status, body := s.call("sendInvoice", form); status != http.StatusOK {
+		t.Fatalf("sendInvoice: %d %v", status, body)
+	}
+	edit := func(markup string) (int, map[string]any) {
+		return s.call("editMessageReplyMarkup", url.Values{"chat_id": {"4242"}, "message_id": {"1"}, "reply_markup": {markup}})
+	}
+	if status, body := edit(`{"inline_keyboard":[[{"text":"Pay now","pay":true},{"text":"Cancel","callback_data":"cancel"}]]}`); status != http.StatusOK {
+		t.Fatalf("an edit keeping the Pay button: %d %v", status, body)
+	}
+	status, body := edit(`{"inline_keyboard":[[{"text":"Cancel","callback_data":"cancel"}]]}`)
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: BUTTON_TYPE_INVALID" {
+		t.Fatalf("an edit dropping the Pay button: %d %v", status, body)
+	}
+}
+
+// Pre-checkout ids are not reused after a reset: an answer to a query minted
+// before it does not reach the one minted after it.
+func TestPreCheckoutQuery_AnAnswerFromBeforeAResetIsRefused(t *testing.T) {
+	s := newStand(t, Options{})
+	pay := func() string {
+		t.Helper()
+		if status, body := s.call("sendInvoice", starsInvoiceForm()); status != http.StatusOK {
+			t.Fatalf("sendInvoice: %d %v", status, body)
+		}
+		_, id, err := s.fake.PayInvoice(InvoicePay{})
+		if err != nil {
+			t.Fatalf("PayInvoice: %v", err)
+		}
+		return id
+	}
+	before := pay()
+	s.fake.Reset()
+	after := pay()
+	if before == after {
+		t.Fatalf("the query after the reset reuses id %q", before)
+	}
+	status, body := s.call("answerPreCheckoutQuery", url.Values{"pre_checkout_query_id": {before}, "ok": {"true"}})
+	if status != http.StatusBadRequest ||
+		body["description"] != "Bad Request: query is too old and response timeout expired or query ID is invalid" {
+		t.Fatalf("an answer from before the reset: %d %v", status, body)
 	}
 }

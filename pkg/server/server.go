@@ -225,8 +225,9 @@ func (s *Server) Reset() {
 	s.commandLists = map[commandKey][]botapi.BotCommand{}
 	s.nextCbq = 0
 	s.cbqChat = map[string]int64{}
+	// Pre-checkout ids keep growing: an answer to a query minted before the
+	// reset must not reach the query minted after it under the same id.
 	s.preCheckouts = map[string]*preCheckout{}
-	s.nextPreCheckout = 0
 	s.nextCharge = 0
 	s.files = map[string]*storedFile{}
 	s.nextFileID = 0

@@ -178,6 +178,7 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 		}
 		stored := chat.appendLocked(copy, true, original.parseMode, original.rich)
 		stored.file = original.file
+		stored.invoicePayload = original.invoicePayload
 		sent = stored.clone()
 		results = append(results, botapi.MessageID{MessageID: sent.MessageID})
 	}

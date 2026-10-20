@@ -465,7 +465,7 @@ Starts a new session without restarting the command. It answers `{"ok":true}` an
 - the faults;
 - the commands set with `setMyCommands`, every scope and language included;
 - the callback queries (an answer to a query minted before the reset is refused, and numbering starts again at `cbq-1`);
-- the pre-checkout queries (an answer to a query minted before the reset is refused, and numbering starts again at `pcq-1`);
+- the pre-checkout queries (an answer to a query minted before the reset is refused; their numbering goes on, so a new query never takes an old id);
 - the uploaded files (numbering starts again at `file_1`);
 - the menu buttons, the bot's and the chats'.
 - configured chat members/metadata, profile photos, inline queries/results, inline edit targets, prepared messages and issued Mini App query ids.
