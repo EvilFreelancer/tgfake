@@ -77,7 +77,7 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `deleteMessages` | `chat_id`, `message_ids` array | `true`; missing messages in a known chat are skipped. |
 | `sendChatAction` | `chat_id` (`action` is recorded, not read) | `true`. The chat shows "typing…" for 5 seconds. |
 | `answerCallbackQuery` | `callback_query_id`, `text`, `show_alert` | `true`. The answer is kept in the chat's `callbacks`. |
-| `sendInvoice` | `chat_id`, `title`, `description`, `payload`, `currency`, `prices`, `start_parameter`, `reply_markup`, the reply and protection parameters | The sent `Message` with an `Invoice`; its `total_amount` is the sum of the prices. |
+| `sendInvoice` | `chat_id`, `title`, `description`, `payload`, `provider_token`, `currency`, `prices`, `start_parameter`, `reply_markup`, the reply and protection parameters | The sent `Message` with an `Invoice`; its `total_amount` is the sum of the prices. |
 | `answerPreCheckoutQuery` | `pre_checkout_query_id`, `ok`, `error_message` | `true`. Confirming one delivers the `successful_payment` service message. |
 | `sendRichMessage` | `chat_id`, `rich_message` (`{"markdown": ...}` or `{"html": ...}`), `reply_markup`, the reply parameters | The sent `Message`; its `text` is the markdown, else the HTML. |
 | `sendRichMessageDraft` | `chat_id`, `draft_id`, `rich_message`, `can_stop`, `keep_on_stop`, `message_thread_id` | `true`. |
@@ -120,7 +120,7 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Replies.** A send replies to a message named by `reply_parameters` (`{"message_id": N, "allow_sending_without_reply": true}`) or by the older `reply_to_message_id` with `allow_sending_without_reply=true`. The answer carries `reply_to_message`, the quoted message without its own quote. A reply to a message that is not in the chat, or was deleted, is refused unless `allow_sending_without_reply` is set, in which case the message goes out unthreaded.
 
-**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat`, `copy_text` or `pay`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md). A `pay` button is the "Pay" button of an invoice: an invoice keyboard must lead with one, when it is sent and when it is edited, and any other message refuses one with `Bad Request: BUTTON_TYPE_INVALID`.
+**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat`, `copy_text` or `pay`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md). A `pay` button is the "Pay" button of an invoice: an invoice is sent with a keyboard that leads with one (`Bad Request: REPLY_MARKUP_BUY_EMPTY` when it has none, `Bad Request: BUTTON_POS_INVALID` when it has one elsewhere), while any other message, and any edit of a keyboard, an invoice's included, refuses one with `Bad Request: BUTTON_TYPE_INVALID`.
 
 **Edits.** The bot's own messages and messages sent via this bot can be edited. `editMessageText` replaces text and keyboard (omitted `reply_markup` removes it) and records `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. Caption/media edits use the same target and keyboard rules. An unchanged edit is refused. Keyboard equality includes every supported button action. Inline targets return `true`; ordinary targets return the edited message.
 
@@ -152,11 +152,11 @@ A scope names its chat by integer id, given as a number or a string of digits, o
 
 ## Payments
 
-`sendInvoice` stores an invoice message. Its `total_amount` is the sum of the `prices`, and the `payload` is kept for the pre-checkout query and the payment service message: it is not part of the wire `Invoice` object, as on Telegram.
+`sendInvoice` stores an invoice message. Its `total_amount` is the sum of the `prices`, the title is cut to 64 characters and the description to 255, as Telegram cuts them, and the `payload` is kept for the pre-checkout query and the payment service message: it is not part of the wire `Invoice` object, as on Telegram. An invoice can be forwarded but not copied, and its text cannot be edited.
 
 The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_checkout_query`. The query carries the currency, the total and the payload of the invoice itself, so a bot that re-checks the price against its own catalogue meets whatever the invoice said - including a price that has moved on since. The query takes exactly one answer: `answerPreCheckoutQuery` refuses the second one the way it refuses a query it never issued. Confirming one with `ok=true` appends a `successful_payment` service message to the chat and queues it, as Telegram does once the money is taken; refusing one takes no money and delivers nothing. `POST /sim/payment` delivers a payment service message of its own, for a charge taken elsewhere and for a `refunded_payment`. On the chat page an invoice shows its Pay button, Telegram's own when its keyboard has none, and a tap on it is `POST /sim/invoice/pay`.
 
-`start_parameter` is kept on the invoice and answered back on the wire. `provider_token`, `max_tip_amount`, `suggested_tip_amounts`, `provider_data`, the photo and `need_*` fields are recorded and have no other effect. Order info and shipping are not modelled: neither `PreCheckoutQuery` nor `SuccessfulPayment` carries an `order_info`.
+`start_parameter` is kept on the invoice and answered back on the wire, empty when the bot gave none. A currency other than `XTR` needs a `provider_token`, which the stand takes whatever it is; `max_tip_amount`, `suggested_tip_amounts`, `provider_data`, the photo and `need_*` fields are recorded and have no other effect. Order info and shipping are not modelled: neither `PreCheckoutQuery` nor `SuccessfulPayment` carries an `order_info`.
 
 ## Limits
 
@@ -176,8 +176,8 @@ The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_che
 | prepared message | 5 minutes in the stand. |
 | `copy_text.text` | 1 to 256 characters. |
 | a bot command | 1 to 32 lower-case Latin letters, digits and `_` after trimming and dropping a leading `/`; its description 1 to 256 characters after trimming. |
-| `title` of `sendInvoice` | 1 to 32 characters. |
-| `description` of `sendInvoice` | 1 to 255 characters. |
+| `title` of `sendInvoice` | Not blank; cut to 64 characters. |
+| `description` of `sendInvoice` | Not empty; cut to 255 characters. |
 | `payload` of `sendInvoice` | 1 to 128 bytes. |
 | `prices` of `sendInvoice` | At least one item, exactly one for payments in Telegram Stars; an item may be negative (a discount), the total has to be positive. |
 | `limit` of `getUpdates` | 100. |
@@ -237,9 +237,13 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | same | `prices` is an empty array | `Bad Request: there must be at least one price part` |
 | same | an `amount` is past 999999999999 either way | `Bad Request: too big amount of the currency specified` |
 | same | the total of the prices is zero or negative / past 999999999999 | `Bad Request: total price must be positive` / `Bad Request: total price is too big` |
-| same | `title`, `description` or `payload` is past the length above | `Bad Request: title is too long` / `description is too long` / `payload is too long` |
-| same | `currency` is `XTR` and `prices` does not hold exactly one item | `Bad Request: prices must contain exactly one item` |
-| same | a keyboard does not lead with a Pay button | `Bad Request: BUTTON_TYPE_INVALID` |
+| same | `title` is nothing but spaces | `Bad Request: INVOICE_TITLE_INVALID` |
+| same | `payload` is past 128 bytes | `Bad Request: INVOICE_PAYLOAD_INVALID` |
+| same | `currency` is not `XTR` and `provider_token` is empty | `Bad Request: PAYMENT_PROVIDER_INVALID` |
+| same | `currency` is `XTR` and `prices` does not hold exactly one item | `Bad Request: STARS_INVOICE_INVALID` |
+| same | a keyboard has no Pay button / has one, but not first in the first row | `Bad Request: REPLY_MARKUP_BUY_EMPTY` / `Bad Request: BUTTON_POS_INVALID` |
+| `editMessageText` | the message is an invoice | `Bad Request: message can't be edited` |
+| `copyMessage` | the message is an invoice | `Bad Request: the message can't be copied` |
 | `answerPreCheckoutQuery` | `ok` is not true and `error_message` is empty | `Bad Request: parameter "error_message" is required` |
 | same | `pre_checkout_query_id` is empty, the stand never issued the query, it was minted before a reset, or it was already answered | `Bad Request: query is too old and response timeout expired or query ID is invalid` |
 | `sendRichMessage` | `rich_message` is not a JSON object with a non-empty `markdown` or `html` | `Bad Request: can't parse rich_message JSON object` |
@@ -274,7 +278,7 @@ Additional refusals for the extended methods:
 | `setWebhook` | malformed URL / external HTTP / unsupported external port | `Bad Request: invalid webhook URL specified` / `Bad Request: bad webhook: An HTTPS URL must be provided for webhook` / `Bad Request: bad webhook: Webhook can be set up only on ports 80, 88, 443 or 8443` |
 | `setWebhook` | secret over 256 bytes / characters outside A-Z, a-z, 0-9, `_`, `-` | `Bad Request: secret token is too long` / `Bad Request: secret token contains illegal characters` |
 
-The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate decoding failures currently use `Bad Request: invalid certificate` rather than OpenSSL's platform-specific diagnostic, and the length and Telegram Stars refusals of `sendInvoice` above use the wording of the Bot API's own constraints rather than a captured answer; these are deliberate validation approximations. Delivery/network diagnostics come from Go's HTTP client. Advanced parameters not listed here are recorded without affecting state.
+The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate decoding failures currently use `Bad Request: invalid certificate` rather than OpenSSL's platform-specific diagnostic; this is a deliberate validation approximation. Delivery/network diagnostics come from Go's HTTP client. Advanced parameters not listed here are recorded without affecting state.
 
 ## Not implemented
 
@@ -282,7 +286,7 @@ The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate
 - Incoming location/contact messages, `edited_message`, `channel_post`, membership and reaction updates are not injected. Chat configuration changes no update queue.
 - Inline games/stickers, rich input content, cache behavior, pagination buttons and query timeouts are not modelled. `cache_time`, `is_personal`, `next_offset` and the inline results button are only recorded.
 - Payments go no further than a bot can see: a payment provider, shipping, order info and `order_info` on the pre-checkout query and the payment are not modelled, `shipping_query` is never sent, and a charge can only be taken or returned - never left pending. `is_ephemeral` of a command is kept but a message is never ephemeral.
-- Media thumbnails, codec validation, live locations, full Telegram membership/permission enforcement and service-message copy restrictions are not modelled. Inline media edits currently resolve uploads as ordinary edits; Telegram permits only existing ids and URLs for inline targets.
+- Media thumbnails, codec validation, live locations, full Telegram membership/permission enforcement and service-message copy restrictions other than an invoice's are not modelled. Inline media edits currently resolve uploads as ordinary edits; Telegram permits only existing ids and URLs for inline targets.
 - Formatting: `parse_mode` is not parsed, so `can't parse entities` never happens on its own. Schedule a fault with `contains` to see it ([sim-api.md](sim-api.md#faults)).
 - Reply keyboards (`keyboard`, `remove_keyboard`, `force_reply`) are accepted and dropped, not shown.
 - Rate limits are not enforced. A `429` happens only when a fault is scheduled.

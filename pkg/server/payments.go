@@ -33,9 +33,10 @@ const (
 	amountMax   = 999_999_999_999
 )
 
-// invoice field limits, as the Bot API states them for sendInvoice.
+// What Telegram keeps of an invoice: a title is cut to 64 characters and a
+// description to 255, while a payload past 128 bytes is refused.
 const (
-	invoiceTitleMax       = 32
+	invoiceTitleMax       = 64
 	invoiceDescriptionMax = 255
 	invoicePayloadMax     = 128 // bytes
 )
@@ -98,8 +99,8 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 		ReplyToMessage: quoted,
 		ReplyMarkup:    markup,
 		Invoice: &botapi.Invoice{
-			Title:          params.Get("title"),
-			Description:    params.Get("description"),
+			Title:          cutRunes(params.Get("title"), invoiceTitleMax),
+			Description:    cutRunes(params.Get("description"), invoiceDescriptionMax),
 			StartParameter: params.Get("start_parameter"),
 			Currency:       params.Get("currency"),
 			TotalAmount:    total,
@@ -132,22 +133,31 @@ func invoiceFieldProblem(params url.Values) string {
 	return ""
 }
 
-// invoiceLimitProblem refuses an invoice past the limits the Bot API states
-// for sendInvoice: the length of the title, the description and the payload,
-// and exactly one price for Telegram Stars. Telegram's own words for these are
-// not known, so the stand uses the wording of the documented constraint.
+// invoiceLimitProblem refuses an invoice Telegram refuses once it has read
+// it: a title of nothing but spaces, a payload past 128 bytes, a currency
+// other than Telegram Stars with no payment provider, and an invoice in Stars
+// whose prices are not exactly one item.
 func invoiceLimitProblem(params url.Values, prices []botapi.LabeledPrice) string {
 	switch {
-	case utf8.RuneCountInString(params.Get("title")) > invoiceTitleMax:
-		return "Bad Request: title is too long"
-	case utf8.RuneCountInString(params.Get("description")) > invoiceDescriptionMax:
-		return "Bad Request: description is too long"
+	case strings.TrimSpace(params.Get("title")) == "":
+		return "Bad Request: INVOICE_TITLE_INVALID"
 	case len(params.Get("payload")) > invoicePayloadMax:
-		return "Bad Request: payload is too long"
+		return "Bad Request: INVOICE_PAYLOAD_INVALID"
+	case params.Get("currency") != xtrCurrency && params.Get("provider_token") == "":
+		return "Bad Request: PAYMENT_PROVIDER_INVALID"
 	case params.Get("currency") == xtrCurrency && len(prices) != 1:
-		return "Bad Request: prices must contain exactly one item"
+		return "Bad Request: STARS_INVOICE_INVALID"
 	}
 	return ""
+}
+
+// cutRunes keeps the first max characters of text, the way Telegram cuts an
+// invoice's title and description instead of refusing them.
+func cutRunes(text string, limit int) string {
+	if utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	return string([]rune(text)[:limit])
 }
 
 // parsePrices reads the prices of an invoice the way the Bot API server and
@@ -202,17 +212,24 @@ func parsePrices(raw string) ([]botapi.LabeledPrice, string) {
 }
 
 // invoiceKeyboardProblem refuses a keyboard Telegram would not put under an
-// invoice: Telegram shows a Pay button of its own when there is none, and when
-// there is one the first button has to be the Pay button.
+// invoice: Telegram shows a Pay button of its own when there is no keyboard,
+// and a keyboard has to lead with one - REPLY_MARKUP_BUY_EMPTY when it has
+// none, BUTTON_POS_INVALID when it has one elsewhere.
 func invoiceKeyboardProblem(markup *botapi.InlineKeyboardMarkup) string {
 	if markup == nil || len(markup.InlineKeyboard) == 0 {
 		return ""
 	}
-	first := markup.InlineKeyboard[0]
-	if len(first) == 0 || !first[0].Pay {
-		return "Bad Request: BUTTON_TYPE_INVALID"
+	if first := markup.InlineKeyboard[0]; len(first) > 0 && first[0].Pay {
+		return ""
 	}
-	return ""
+	for _, row := range markup.InlineKeyboard {
+		for _, b := range row {
+			if b.Pay {
+				return "Bad Request: BUTTON_POS_INVALID"
+			}
+		}
+	}
+	return "Bad Request: REPLY_MARKUP_BUY_EMPTY"
 }
 
 func (s *Server) answerPreCheckoutQuery(w http.ResponseWriter, method string, params url.Values) {

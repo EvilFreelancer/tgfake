@@ -31,12 +31,15 @@ func TestSendInvoice_Refusals(t *testing.T) {
 	}{
 		{"no chat", func(f url.Values) { f.Del("chat_id") }, "Bad Request: chat_id is empty"},
 		{"empty title", func(f url.Values) { f.Set("title", "") }, `Bad Request: parameter "title" is required`},
-		{"title over 32 characters", func(f url.Values) { f.Set("title", strings.Repeat("т", 33)) }, "Bad Request: title is too long"},
+		{"a title of spaces", func(f url.Values) { f.Set("title", "   ") }, "Bad Request: INVOICE_TITLE_INVALID"},
 		{"empty description", func(f url.Values) { f.Set("description", "") }, `Bad Request: parameter "description" is required`},
-		{"description over 255 characters", func(f url.Values) { f.Set("description", strings.Repeat("a", 256)) }, "Bad Request: description is too long"},
 		{"empty payload", func(f url.Values) { f.Set("payload", "") }, `Bad Request: parameter "payload" is required`},
 		{"a payload that is not UTF-8", func(f url.Values) { f.Set("payload", "\xff") }, "Bad Request: the payload must be encoded in UTF-8"},
-		{"payload over 128 bytes", func(f url.Values) { f.Set("payload", strings.Repeat("я", 65)) }, "Bad Request: payload is too long"},
+		{"payload over 128 bytes", func(f url.Values) { f.Set("payload", strings.Repeat("я", 65)) }, "Bad Request: INVOICE_PAYLOAD_INVALID"},
+		{"a currency with no payment provider", func(f url.Values) {
+			f.Set("currency", "USD")
+			f.Set("prices", `[{"label":"Fee","amount":100}]`)
+		}, "Bad Request: PAYMENT_PROVIDER_INVALID"},
 		{"empty currency", func(f url.Values) { f.Set("currency", "") }, `Bad Request: parameter "currency" is required`},
 		{"no prices", func(f url.Values) { f.Del("prices") }, `Bad Request: parameter "prices" is required`},
 		{"prices that are not JSON", func(f url.Values) { f.Set("prices", `[{amount:1}]`) }, "Bad Request: can't parse prices JSON object"},
@@ -51,14 +54,21 @@ func TestSendInvoice_Refusals(t *testing.T) {
 		{"a total of zero", func(f url.Values) { f.Set("prices", `[{"label":"x","amount":0}]`) }, "Bad Request: total price must be positive"},
 		{"a discount past the price", func(f url.Values) {
 			f.Set("currency", "USD")
+			f.Set("provider_token", "test-provider")
 			f.Set("prices", `[{"label":"Fee","amount":100},{"label":"Discount","amount":-150}]`)
 		}, "Bad Request: total price must be positive"},
 		{"Stars with two prices", func(f url.Values) {
 			f.Set("prices", `[{"label":"a","amount":1},{"label":"b","amount":2}]`)
-		}, "Bad Request: prices must contain exactly one item"},
-		{"a keyboard that does not lead with Pay", func(f url.Values) {
+		}, "Bad Request: STARS_INVOICE_INVALID"},
+		{"a keyboard with no Pay button", func(f url.Values) {
 			f.Set("reply_markup", `{"inline_keyboard":[[{"text":"Cancel","callback_data":"cancel"}]]}`)
-		}, "Bad Request: BUTTON_TYPE_INVALID"},
+		}, "Bad Request: REPLY_MARKUP_BUY_EMPTY"},
+		{"a keyboard with the Pay button second", func(f url.Values) {
+			f.Set("reply_markup", `{"inline_keyboard":[[{"text":"Cancel","callback_data":"cancel"},{"text":"Pay","pay":true}]]}`)
+		}, "Bad Request: BUTTON_POS_INVALID"},
+		{"a keyboard with the Pay button on the second row", func(f url.Values) {
+			f.Set("reply_markup", `{"inline_keyboard":[[{"text":"Cancel","callback_data":"cancel"}],[{"text":"Pay","pay":true}]]}`)
+		}, "Bad Request: BUTTON_POS_INVALID"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -81,6 +91,7 @@ func TestSendInvoice_TakesADiscountLine(t *testing.T) {
 	s := newStand(t, Options{})
 	form := starsInvoiceForm()
 	form.Set("currency", "USD")
+	form.Set("provider_token", "test-provider")
 	form.Set("prices", `[{"label":"Fee","amount":"200"},{"label":"Discount","amount":-50}]`)
 	status, body := s.call("sendInvoice", form)
 	if status != http.StatusOK {
@@ -106,6 +117,7 @@ func TestSendInvoice_RecordsWhatTheBotGaveIt(t *testing.T) {
 	s := newStand(t, Options{})
 	form := starsInvoiceForm()
 	form.Set("currency", "USD")
+	form.Set("provider_token", "test-provider")
 	form.Set("prices", `[{"label":"Fee","amount":100},{"label":"Tax","amount":50}]`)
 	status, body := s.call("sendInvoice", form)
 	if status != http.StatusOK {
@@ -194,6 +206,7 @@ func TestPreCheckoutQuery_CarriesTheInvoicePriceAndPayload(t *testing.T) {
 	s := newStand(t, Options{})
 	form := starsInvoiceForm()
 	form.Set("currency", "USD")
+	form.Set("provider_token", "test-provider")
 	form.Set("prices", `[{"label":"Fee","amount":100},{"label":"Tax","amount":50}]`)
 	if status, body := s.call("sendInvoice", form); status != http.StatusOK {
 		t.Fatalf("sendInvoice: %d %v", status, body)
@@ -320,9 +333,10 @@ func TestPayInvoice_AForwardKeepsThePayload(t *testing.T) {
 	}
 }
 
-// An edit of an invoice's keyboard keeps the rule sendInvoice applied: the
-// Pay button may stay and has to lead.
-func TestEditMessageReplyMarkup_KeepsTheInvoiceRule(t *testing.T) {
+// An edit of an invoice's keyboard refuses a Pay button like any edit does,
+// and takes a keyboard without one; the invoice's text cannot be edited.
+// These are the answers of api.telegram.org.
+func TestEditMessageReplyMarkup_OfAnInvoice(t *testing.T) {
 	s := newStand(t, Options{})
 	form := starsInvoiceForm()
 	form.Set("reply_markup", `{"inline_keyboard":[[{"text":"Pay","pay":true}]]}`)
@@ -332,12 +346,45 @@ func TestEditMessageReplyMarkup_KeepsTheInvoiceRule(t *testing.T) {
 	edit := func(markup string) (int, map[string]any) {
 		return s.call("editMessageReplyMarkup", url.Values{"chat_id": {"4242"}, "message_id": {"1"}, "reply_markup": {markup}})
 	}
-	if status, body := edit(`{"inline_keyboard":[[{"text":"Pay now","pay":true},{"text":"Cancel","callback_data":"cancel"}]]}`); status != http.StatusOK {
+	status, body := edit(`{"inline_keyboard":[[{"text":"Pay now","pay":true},{"text":"Cancel","callback_data":"cancel"}]]}`)
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: BUTTON_TYPE_INVALID" {
 		t.Fatalf("an edit keeping the Pay button: %d %v", status, body)
 	}
-	status, body := edit(`{"inline_keyboard":[[{"text":"Cancel","callback_data":"cancel"}]]}`)
-	if status != http.StatusBadRequest || body["description"] != "Bad Request: BUTTON_TYPE_INVALID" {
+	if status, body := edit(`{"inline_keyboard":[[{"text":"Cancel","callback_data":"cancel"}]]}`); status != http.StatusOK {
 		t.Fatalf("an edit dropping the Pay button: %d %v", status, body)
+	}
+	status, body = s.call("editMessageText", url.Values{"chat_id": {"4242"}, "message_id": {"1"}, "text": {"hello"}})
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: message can't be edited" {
+		t.Fatalf("an edit of the invoice's text: %d %v", status, body)
+	}
+}
+
+// An invoice is cut to what Telegram keeps: a title of 64 characters and a
+// description of 255.
+func TestSendInvoice_CutsTitleAndDescription(t *testing.T) {
+	s := newStand(t, Options{})
+	form := starsInvoiceForm()
+	form.Set("title", strings.Repeat("т", 100))
+	form.Set("description", strings.Repeat("d", 300))
+	status, body := s.call("sendInvoice", form)
+	if status != http.StatusOK {
+		t.Fatalf("sendInvoice: %d %v", status, body)
+	}
+	invoice := result(t, body)["invoice"].(map[string]any)
+	if invoice["title"] != strings.Repeat("т", 64) || invoice["description"] != strings.Repeat("d", 255) {
+		t.Fatalf("invoice: %v", invoice)
+	}
+}
+
+// An invoice can be forwarded but not copied.
+func TestCopyMessage_RefusesAnInvoice(t *testing.T) {
+	s := newStand(t, Options{})
+	if status, body := s.call("sendInvoice", starsInvoiceForm()); status != http.StatusOK {
+		t.Fatalf("sendInvoice: %d %v", status, body)
+	}
+	status, body := s.call("copyMessage", url.Values{"chat_id": {"4242"}, "from_chat_id": {"4242"}, "message_id": {"1"}})
+	if status != http.StatusBadRequest || body["description"] != "Bad Request: the message can't be copied" {
+		t.Fatalf("copyMessage of an invoice: %d %v", status, body)
 	}
 }
 

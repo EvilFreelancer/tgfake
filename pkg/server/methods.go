@@ -313,6 +313,11 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 		return
 	}
 	newText := target.msg.Text
+	if target.msg.Invoice != nil && strings.EqualFold(method, "editMessageText") {
+		s.mu.Unlock()
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message can't be edited", 0)
+		return
+	}
 	if strings.EqualFold(method, "editMessageText") {
 		if target.file != nil || target.msg.Location != nil || target.msg.Contact != nil {
 			s.mu.Unlock()
@@ -332,14 +337,10 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 		}
 	}
 	newMarkup, problem := parseKeyboard(params.Get("reply_markup"))
-	invoice := target.msg.Invoice != nil
 	if problem == "" {
-		problem = validateKeyboard(newMarkup, target.msg.Chat.Type, invoice)
-	}
-	if problem == "" && invoice {
-		// An invoice keeps the rule sendInvoice applied: a keyboard leads
-		// with its Pay button.
-		problem = invoiceKeyboardProblem(newMarkup)
+		// A Pay button is refused in an edit even of an invoice, as Telegram
+		// refuses it; a keyboard without one, or none, is taken.
+		problem = validateKeyboard(newMarkup, target.msg.Chat.Type, false)
 	}
 	if problem != "" {
 		s.mu.Unlock()

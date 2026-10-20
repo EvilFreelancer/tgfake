@@ -132,6 +132,11 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 			problem = "Bad Request: message can't be forwarded"
 			break
 		}
+		if !forward && !bulk && message.msg.Invoice != nil {
+			// An invoice can be forwarded, not copied.
+			problem = "Bad Request: the message can't be copied"
+			break
+		}
 		sources = append(sources, message)
 	}
 	if problem != "" {
