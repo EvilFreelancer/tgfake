@@ -12,3 +12,8 @@ Feature: The tgfake command serves a stand on a port
     Then the bot's next getUpdates carries the message "hello"
     When the bot asks the model to answer "hello"
     Then the model answers "You said: hello"
+
+  Scenario: A container bot registers an HTTP webhook with an explicit opt-in
+    Given the tgfake command allows HTTP webhooks for container tests
+    When the bot registers a webhook at "http://bot:8080/webhook"
+    Then the webhook registration succeeds

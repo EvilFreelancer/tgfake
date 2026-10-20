@@ -22,6 +22,7 @@ The module needs Go 1.22 or newer (`go 1.22.0` in `go.mod`). The packages import
 | `BotID` | `server.DefaultBotID` (`7000000001`) | The user id `getMe` reports. |
 | `MaxPollWait` | 30 s | The longest a `getUpdates` request is held open. Keep it short in tests. |
 | `AllowedUpdates` | nil | The subscription the bot starts with, as a previous bot process would have left it; nil delivers every kind. |
+| `AllowHTTPWebhook` | `false` | Permit non-loopback HTTP webhook URLs on any port for container test networks; HTTPS and secret-token checks stay strict. |
 | `InlineMode` | false | Enable inline query injection and report the BotFather setting in `getMe`. |
 | `HTTPClient` | a client with a 10 s timeout | Client for media URL downloads and webhook delivery. Configure before serving; it is not mutated. |
 | `Logf` | nil | Receives one line per Bot API call, for example `t.Logf`. |

@@ -29,4 +29,5 @@ shows it missing.
   everything; CI runs the same on Linux and the plain suite on macOS and
   Windows, plus Go 1.22.
 - **Examples are tested.** `examples/echobot` is part of `go test ./...`;
-  `examples/shell/bot-e2e.sh` runs in CI against the binary the action installs.
+  `examples/shell/bot-e2e.sh` runs in CI against the binary the action installs;
+  `scripts/test-docker.sh` runs `examples/docker` against the image CI builds.
