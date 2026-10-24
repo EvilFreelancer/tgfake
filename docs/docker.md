@@ -23,7 +23,7 @@ Open `http://127.0.0.1:18790/` and send a message. The included Node.js echo bot
 TGFAKE_IMAGE=tgfake:local docker compose -f examples/docker/compose.yml down
 ```
 
-For a published release, set `TGFAKE_IMAGE=ghcr.io/evilfreelancer/tgfake:1.3.0` instead, or the version of a later release; images are published for Linux amd64 and arm64 from v1.2.0 on. Published tags omit the leading `v`; pin a full version for repeatable tests.
+For a published release, set `TGFAKE_IMAGE=ghcr.io/evilfreelancer/tgfake:1.3.1` instead, or the version of a later release; images are published for Linux amd64 and arm64 from v1.2.0 on. Published tags omit the leading `v`; pin a full version for repeatable tests.
 
 ## Connect your bot
 

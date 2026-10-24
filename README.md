@@ -61,7 +61,7 @@ go install github.com/EvilFreelancer/tgfake/cmd/tgfake@latest
 In GitHub Actions, the [action](docs/ci.md) installs it and can start it:
 
 ```yaml
-- uses: EvilFreelancer/tgfake@v1.3.0   # installs the v1.3.0 binary
+- uses: EvilFreelancer/tgfake@v1.3.1   # installs the v1.3.1 binary
   with:
     start: "true"
     args: --llm
@@ -72,7 +72,7 @@ arm64. It runs as a non-root user and listens on `0.0.0.0:18790`; flags
 after the image name are added to that:
 
 ```bash
-docker run --rm -p 127.0.0.1:18790:18790 ghcr.io/evilfreelancer/tgfake:1.3.0 --llm
+docker run --rm -p 127.0.0.1:18790:18790 ghcr.io/evilfreelancer/tgfake:1.3.1 --llm
 ```
 
 ## Quick start
@@ -84,7 +84,7 @@ tgfake --llm
 ```
 
 ```text
-tgfake v1.3.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
+tgfake v1.3.1: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
   Bot API:    http://127.0.0.1:18790/bot<token>/<method>  (in place of https://api.telegram.org)
   chat page:  http://127.0.0.1:18790/
   sim API:    http://127.0.0.1:18790/sim/
