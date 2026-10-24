@@ -156,7 +156,7 @@
       </div>
     </div>
     <div class="tgb-view" id="browserView">
-      <iframe id="browserFrame" title="In-app browser" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+      <iframe id="browserFrame" title="In-app browser" allow="clipboard-write; fullscreen"></iframe>
     </div>
     <div class="tgb-toolbar">
       <button type="button" id="browserBack" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
@@ -238,7 +238,7 @@
   // ---- Links: Telegram turns the web addresses in a message into links and
   // opens them, and url buttons, in its in-app browser, unless the person has
   // chosen to open links in a browser app (here: a new tab).
-  const WEB_ADDRESS = /https?:\/\/[^\s<>"']+/g;
+  const WEB_ADDRESS = /https?:\/\/[^\s<>"']+/gi;
   function isWebAddress(address) {
     try { const p = new URL(address).protocol; return p === 'http:' || p === 'https:'; } catch (e) { return false; }
   }
@@ -251,16 +251,27 @@
     else window.open(address, '_blank', 'noopener');
   }
   function notice(text) { $('linkNotice').textContent = text; }
+  // trimAddress drops what follows an address in a sentence: punctuation that
+  // ends the sentence, and a closing bracket the address did not open, so
+  // (https://en.wikipedia.org/wiki/Foo_(bar)) keeps the bracket of Foo_(bar).
+  function trimAddress(address) {
+    const count = (s, c) => s.split(c).length - 1;
+    for (;;) {
+      const before = address;
+      address = address.replace(/[.,;:!?]+$/, '');
+      for (const [open, close] of [['(', ')'], ['[', ']']]) {
+        if (address.endsWith(close) && count(address, close) > count(address, open)) address = address.slice(0, -1);
+      }
+      if (address === before) return address;
+    }
+  }
   // withLinks is the text of a message with its web addresses as links.
-  // Punctuation that ends a sentence is not part of the address, nor is a
-  // closing parenthesis the address did not open.
   function withLinks(text) {
     const box = el('div');
     text = text === undefined || text === null ? '' : String(text);
     let last = 0;
     for (const match of text.matchAll(WEB_ADDRESS)) {
-      let address = match[0].replace(/[.,;:!?]+$/, '');
-      if (address.endsWith(')') && !address.includes('(')) address = address.slice(0, -1);
+      const address = trimAddress(match[0]);
       if (match.index > last) box.appendChild(document.createTextNode(text.slice(last, match.index)));
       const a = el('a', 'link', address);
       a.setAttribute('href', address);
@@ -611,7 +622,7 @@
         'status bar ' + this.statusBar() + ' px', 'address bar ' + ADDRESS_BAR + ' px',
         // A phone draws its scrollbar over the page; a desktop browser may
         // take its width from a page that scrolls.
-        scrollbar ? 'this browser’s scrollbar takes ' + scrollbar + ' px of a page that scrolls, which a phone does not' : '',
+        scrollbar ? "this browser's scrollbar takes " + scrollbar + ' px of a page that scrolls, which a phone does not' : '',
       ].filter(Boolean).join(' · ');
     },
     load(address) {
@@ -663,7 +674,7 @@
     bookmark() { if (this.url) { this.bookmarks.push(this.url); this.log('bookmark', { url: this.url }); } },
     openExternally() { if (this.url) { this.log('open_external', { url: this.url }); window.open(this.url, '_blank', 'noopener'); } },
     setState(next) {
-      if (next.size && STATUS_BAR[next.size] !== undefined) $('browserSize').value = next.size;
+      if (next.size && Object.prototype.hasOwnProperty.call(STATUS_BAR, next.size)) $('browserSize').value = next.size;
       if (next.theme === 'dark' || next.theme === 'light') $('browserTheme').value = next.theme;
       this.page = null;
       this.layout();

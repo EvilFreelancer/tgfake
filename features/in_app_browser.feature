@@ -10,7 +10,14 @@ Feature: The chat page opens links in Telegram's in-app browser
     Given the chat page of a stand and a site to open
     When the bot sends the person the site's address with a url button to it
     Then the chat shows the address as a link to the site
-    And the url button opens the site in the in-app browser
+    And tapping the url button opens the site in the in-app browser
+    And tapping the link in the message opens the site in the in-app browser
+
+  Scenario: The person can open links in a new tab instead
+    Given the chat page of a stand and a site to open
+    When the bot sends the person the site's address with a url button to it
+    And the person chooses to open links in a new tab
+    Then tapping the url button opens the site in a new tab and not in the in-app browser
 
   Scenario: The site is laid out at the width of the phone
     Given the chat page of a stand and a site to open

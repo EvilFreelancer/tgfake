@@ -6,7 +6,7 @@ Telegram opens a link a person taps in a chat, a web address in a message or a `
 
 | What the person taps | What the chat page does |
 |----------------------|-------------------------|
-| A web address in the text or caption of a message | Telegram finds the addresses in any message and shows them as links; the page does the same for `http://` and `https://` addresses. Punctuation that ends a sentence is not part of an address, nor is a closing parenthesis the address did not open. |
+| A web address in the text or caption of a message | Telegram finds the addresses in any message and shows them as links; the page does the same for `http://` and `https://` addresses, in any letter case. Punctuation that ends a sentence is not part of an address, nor is a closing parenthesis or square bracket the address did not open, so `(https://en.wikipedia.org/wiki/Foo_(bar))` links to `.../Foo_(bar)`. |
 | A `url` button | The button is marked with an arrow, and its tooltip says where it opens. |
 | A `web_app` button | Opens the Mini App in its own phone frame ([mini-apps.md](mini-apps.md#the-phone-frame)), not in the browser. |
 
@@ -53,6 +53,7 @@ A status line under the phone shows the size of the WebView, the size the site i
 - **Telegram's font size.** The menu of Telegram's browser scales the text of a site from 50 % to 150 % by putting `-webkit-text-size-adjust` into the page. A frame cannot style a site of another origin, so the chat page has no such control.
 - **Sites that refuse a frame.** A site that sends `X-Frame-Options` or a `frame-ancestors` rule that leaves the chat page out is refused inside the frame by the browser itself. Open it in a new tab, or point the browser at a development server of the site.
 - **The bars on scroll.** Telegram shrinks its address bar as the page scrolls; the frame keeps it at its full height.
+- **A site that leaves the frame.** The frame is not sandboxed, as Telegram's browser is a whole browser, so a site that navigates the top window, with a `target="_top"` link or from a script, replaces the chat page itself.
 
 ## Hooks for browser tests
 
