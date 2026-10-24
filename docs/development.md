@@ -10,6 +10,7 @@ This page is for contributors: how the repository is laid out, the `make` target
 - `python3` and `curl` for `make install-test`, which serves the snapshot archives with `python3 -m http.server`.
 - A local Linux Docker engine and `docker pull node:24-bookworm-slim` for serverless integration tests. `TGFAKE_TEST_DOCKER=1` requires these tests instead of skipping them when Docker or the image is unavailable. Linux CI enables it.
 - Docker with the Compose plugin for the container image and [`scripts/test-docker.sh`](../scripts/test-docker.sh), which also pulls `node:24-alpine` for the example bot.
+- Chrome or Chromium for the tests of the chat page's in-app browser, which run the page headless. They look for `google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser` or `chrome` on the `PATH` and the usual install paths on macOS and Windows, or take the binary from `TGFAKE_CHROME`, and are skipped without one. `TGFAKE_TEST_CHROME=1` requires them instead; Linux CI sets it.
 
 The packages and the command import nothing outside the standard library. The one module requirement, `github.com/cucumber/godog`, is used by tests only.
 
@@ -23,7 +24,7 @@ The packages and the command import nothing outside the standard library. The on
 | [`pkg/webapp`](../pkg/webapp) | Mini App launch data without state: signing, validation, theme parameters, the address rule. |
 | [`pkg/llmstub`](../pkg/llmstub) | The scripted OpenAI-compatible model. |
 | [`pkg/serverless`](../pkg/serverless) | Local tgcloud module execution in Docker, the embedded JavaScript SDK, SQLite, update polling and authenticated endpoints. |
-| [`internal/chatpage`](../internal/chatpage) | The chat page: one self-contained HTML file embedded into the binary, which reads everything from the simulation API. |
+| [`internal/chatpage`](../internal/chatpage) | The chat page: one self-contained HTML file embedded into the binary, which reads everything from the simulation API, with the phone frames of Mini Apps and of the in-app browser. |
 | [`features/`](../features) | Gherkin specs of the happy paths, run by godog harnesses in the packages. |
 | [`examples/echobot`](../examples/echobot) | A standard-library bot and its in-process tests. |
 | [`examples/serverless`](../examples/serverless) | A tgcloud counter project with a handler, schema and Mini App endpoint. |
@@ -75,8 +76,9 @@ The happy path of a feature is a Gherkin scenario in `features/`, and a godog ha
 | [`features/bot_commands.feature`](../features/bot_commands.feature) | [`pkg/server/bdd_commands_test.go`](../pkg/server/bdd_commands_test.go), against the scope and language chain of `getMyCommands`. |
 | [`features/payments.feature`](../features/payments.feature) | [`pkg/server/bdd_payments_test.go`](../pkg/server/bdd_payments_test.go), from `sendInvoice` through the pre-checkout query to the payment service messages. |
 | [`features/serverless.feature`](../features/serverless.feature) | [`pkg/serverless/bdd_serverless_test.go`](../pkg/serverless/bdd_serverless_test.go), against the Docker runtime and counter example. |
+| [`features/in_app_browser.feature`](../features/in_app_browser.feature) | [`internal/chatpage/bdd_browser_test.go`](../internal/chatpage/bdd_browser_test.go), which runs the chat page in headless Chrome and reads the document it ends up with. |
 
-Edge cases and refusals are ordinary unit tests next to the code: `pkg/server/*_test.go` for the Bot API, the update queue, media, drafts, commands, payments and the simulation API, `pkg/llmstub/llmstub_test.go`, `pkg/webapp/webapp_test.go` (including a known signing vector), `internal/chatpage/page_test.go`, which holds the page to having no outside asset, and `cmd/tgfake/main_test.go`. `go test ./...` also runs the tests of `examples/echobot`, so the example stays a working bot.
+Edge cases and refusals are ordinary unit tests next to the code: `pkg/server/*_test.go` for the Bot API, the update queue, media, drafts, commands, payments and the simulation API, `pkg/llmstub/llmstub_test.go`, `pkg/webapp/webapp_test.go` (including a known signing vector), `internal/chatpage/page_test.go`, which holds the page to having no outside asset, `internal/chatpage/browser_test.go` for the links and sizes of the in-app browser, and `cmd/tgfake/main_test.go`. `go test ./...` also runs the tests of `examples/echobot`, so the example stays a working bot.
 
 A change starts with a failing scenario for a new behaviour, or a failing unit test for an edge case or a bug, and carries its documentation: a new Bot API method is a row of [bot-api.md](bot-api.md), a new route a section of [sim-api.md](sim-api.md), a new flag a row of [command.md](command.md).
 
@@ -101,7 +103,7 @@ TGFAKE_IMAGE=tgfake:local sh scripts/test-docker.sh
 
 | Job | What it checks |
 |-----|----------------|
-| Test | `go vet` and the tests on Ubuntu, macOS and Windows with the stable Go, and on Ubuntu with Go 1.22. On Linux the tests run under the race detector. |
+| Test | `go vet` and the tests on Ubuntu, macOS and Windows with the stable Go, and on Ubuntu with Go 1.22. On Linux the tests run under the race detector, with the serverless tests in Docker and the in-app browser tests in the runner's Chrome required. |
 | Lint | golangci-lint v2.12.2, on the Go 1.26 toolchain it is built with, and `go mod tidy -diff`, which fails when `go.mod` or `go.sum` is not tidy. |
 | Release snapshot | The release without publishing it: GoReleaser builds every archive as a snapshot and keeps them as a workflow artifact. |
 | Install | On Ubuntu, macOS and Windows: `scripts/test-install.sh` installs the host's archive from a local mirror of the snapshot (and, outside Windows, again over a running binary), then the action in `action.yml` installs the snapshot from that mirror and starts it with `--llm`, a bot's first calls (`getMe`, a message through `/sim/message`, `getUpdates`, `/v1/models`) are made against it and the installed version is compared with the snapshot's; a second start on port 0 must report its own address. On Linux, `examples/shell/bot-e2e.sh` runs the example bot against the installed binary. |

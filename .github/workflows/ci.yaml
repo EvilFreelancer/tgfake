@@ -48,6 +48,14 @@ jobs:
           docker pull node:24-bookworm-slim
           echo "TGFAKE_TEST_DOCKER=1" >> "$GITHUB_ENV"
 
+      # The runner image ships Chrome; the chat page's in-app browser tests
+      # run it headless and must not be skipped here.
+      - name: Prepare chat page browser tests
+        if: runner.os == 'Linux'
+        run: |
+          google-chrome --version
+          echo "TGFAKE_TEST_CHROME=1" >> "$GITHUB_ENV"
+
       - name: Test
         if: runner.os != 'Linux'
         run: go test -count=1 ./...
