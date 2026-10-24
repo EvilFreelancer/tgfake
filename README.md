@@ -29,7 +29,9 @@ purpose. No token, no phone, no network.
 - **A chat page.** `http://127.0.0.1:18790/` is a Telegram client for the
   bot: type messages, tap buttons, open Mini Apps in a phone frame and watch
   the Bot API calls arrive. With `--inline`, an Inline button lets you search
-  and select the bot's results.
+  and select the bot's results. Links open in Telegram's
+  [in-app browser](docs/in-app-browser.md) on a phone-sized screen, so a site
+  can be checked at the width a Telegram user sees it.
 - **A scripted model.** `--llm` also serves an OpenAI-compatible
   `/v1/chat/completions` that answers by rule, in turn or by echo, streams
   word by word and can call a tool, so an LLM bot runs with no key.
@@ -163,6 +165,7 @@ stand is started with `--allow-http-webhook` to accept it.
 | [docs/bot-api.md](docs/bot-api.md) | The Bot API methods served, what each refuses the way Telegram does, and what is not implemented. |
 | [docs/sim-api.md](docs/sim-api.md) | The simulation API: messages, taps, transcripts, the outbox, faults, Mini App launches, reset. |
 | [docs/mini-apps.md](docs/mini-apps.md) | `web_app` buttons, the menu button, signed launch data and the phone frame of the chat page. |
+| [docs/in-app-browser.md](docs/in-app-browser.md) | Links in the chat page opening in Telegram's in-app browser: screen sizes, the bars, what the frame does not reproduce, hooks for browser tests. |
 | [docs/scripted-model.md](docs/scripted-model.md) | The OpenAI-compatible model of `--llm`: answers, rules, tool calls, streaming. |
 | [docs/serverless.md](docs/serverless.md) | Local tgcloud projects in Docker: handlers, SDK, SQLite, authenticated endpoints and Go tests. |
 | [docs/go.md](docs/go.md) | Using the packages from Go tests: `server`, `botapi`, `webapp`, `llmstub`. |

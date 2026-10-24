@@ -25,6 +25,9 @@ shows it missing.
   bounded poll; move time through `s.now` instead of sleeping past a deadline.
 - **Clean shutdown.** Close the server before its `httptest.Server`, so held
   long polls do not stall the listener.
+- **The chat page in a browser.** What the page's script does is tested in
+  headless Chrome (`internal/chatpage`): skipped without it, required in Linux
+  CI by `TGFAKE_TEST_CHROME=1`.
 - **Race-clean.** `make check` runs golangci-lint and `go test -race` over
   everything; CI runs the same on Linux and the plain suite on macOS and
   Windows, plus Go 1.22.

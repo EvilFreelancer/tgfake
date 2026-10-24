@@ -17,7 +17,7 @@ in-process. `README.md` is the landing page; `docs/` is the reference.
 | `pkg/webapp` | Mini App launch data with no state: `Sign`, `Validate`, `ThemeParams`, `URLProblem`, `AppendLaunchParams`, the claimed version and platform. |
 | `pkg/llmstub` | The scripted model: `/v1/models` and `/v1/chat/completions`, rules, answers in turn, echo, tool-call rules, `StripTags`, streaming pace. |
 | `pkg/serverless` | Local tgcloud projects: JavaScript SDK and SQLite in Docker, invocation lifetimes, update polling and authenticated Mini App endpoints. Docker is optional outside this mode. |
-| `internal/chatpage` | The chat page, one self-contained HTML file embedded into the binary; it reads everything from the simulation API. |
+| `internal/chatpage` | The chat page, one self-contained HTML file embedded into the binary; it reads everything from the simulation API. It plays the Telegram client: Mini Apps in a phone frame, links in Telegram's in-app browser. `bdd_browser_test.go` runs `features/in_app_browser.feature` against the page in headless Chrome. |
 | `features/` | Gherkin specs of the happy paths, run by godog harnesses in the owning package (`pkg/server/bdd_*_test.go`, `cmd/tgfake/bdd_command_test.go`). |
 | `examples/echobot`, `examples/shell` | A standard-library bot with its in-process tests, and an any-language integration test driving the binary and a bot process with curl. |
 | `Dockerfile`, `examples/docker`, `scripts/test-docker.sh` | The container image (a static build on Alpine, non-root, `--addr 0.0.0.0:18790` in its entrypoint), a Compose example with a Node.js webhook echo bot behind `--allow-http-webhook`, and its end-to-end test. |
