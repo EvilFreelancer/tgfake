@@ -264,7 +264,7 @@ available. Partial SSE failures and deterministic stream faults are future work.
 
 | Route | Effect |
 |-------|--------|
-| `GET /sim/llm/log` | `{entries, count, dropped, calls}`; the newest 1000 completed entries in request reservation order, the number of older entries dropped since the last clear or reset in `dropped`, total completion counter in `calls`. |
+| `GET /sim/llm/log` | `{entries, count, dropped, calls}`; the 1000 completed entries with the newest reservations, in request reservation order (a request reserved early and finished late is the first to go), the number of older entries dropped since the last clear or reset in `dropped`, total completion counter in `calls`. |
 | `DELETE /sim/llm/log` | Clear completed entries without rewinding counters or cursors. |
 | `PUT /sim/llm/script` | Replace the JSON rule array, validate explicit negative steps and reset cursors. Preserve journal and counters. A body that is not a rule array, or a script that fails validation, is answered `400` with `{"error": "..."}`. |
 | `POST /sim/llm/reset` | Clear journal, rewind scenario cursors and legacy answer rotation. Keep completion IDs and counters increasing. |

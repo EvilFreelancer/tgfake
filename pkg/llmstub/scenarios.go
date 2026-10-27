@@ -396,11 +396,16 @@ func (s *Server) stepBody(step Step, req chatRequest, seq int) []byte {
 // are dropped, so a long-running stand does not grow without bound.
 const journalLimit = 1000
 
-// journal files a completed request, dropping the oldest past journalLimit.
+// journal files a completed request in reservation order, so the entries
+// dropped past journalLimit are the oldest reservations, not the earliest
+// completions.
 func (s *Server) journal(entry Entry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entries = append(s.entries, entry)
+	i := sort.Search(len(s.entries), func(i int) bool { return s.entries[i].Seq > entry.Seq })
+	s.entries = append(s.entries, Entry{})
+	copy(s.entries[i+1:], s.entries[i:])
+	s.entries[i] = entry
 	if extra := len(s.entries) - journalLimit; extra > 0 {
 		s.entries = append([]Entry(nil), s.entries[extra:]...)
 		s.dropped += extra
@@ -417,7 +422,6 @@ func (s *Server) Log() []Entry {
 	raw, _ := json.Marshal(entries)
 	out := []Entry{}
 	_ = json.Unmarshal(raw, &out)
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out
 }
 
@@ -525,7 +529,8 @@ func (s *Server) registerDiagnostics(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sim/llm/reset", func(w http.ResponseWriter, _ *http.Request) { s.Reset(); writeJSON(w, map[string]any{"ok": true}) })
 	mux.HandleFunc("PUT /sim/llm/script", func(w http.ResponseWriter, r *http.Request) {
 		var rules []Rule
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&rules); err != nil {
+		// null decodes to no rules; only [] empties the script.
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&rules); err != nil || rules == nil {
 			refuse(w, "invalid script")
 			return
 		}

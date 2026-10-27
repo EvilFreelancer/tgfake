@@ -552,3 +552,45 @@ func TestScriptRouteRefusesInJSON(t *testing.T) {
 		}
 	}
 }
+
+// The journal drops the oldest reservations, not the earliest completions: a
+// request reserved first and finished last is the one to go.
+func TestJournalDropsTheOldestReservation(t *testing.T) {
+	s := &Server{Rules: []Rule{{Name: "slow", Filters: Filters{User: "slow"}, Steps: []Step{{DelayMS: 60000}}}}}
+	handler := s.Handler()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"user":"slow"}`)).WithContext(ctx))
+	}()
+	for deadline := time.Now().Add(time.Second); s.Calls() == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("the slow request was not reserved")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for i := 0; i < journalLimit+1; i++ {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"user":"fast","messages":[{"role":"user","content":"hi"}]}`)))
+	}
+	cancel()
+	<-done
+	log := s.Log()
+	if len(log) != journalLimit || log[0].Seq != 3 || log[len(log)-1].Seq != journalLimit+2 {
+		t.Fatalf("%d entries from seq %d to %d", len(log), log[0].Seq, log[len(log)-1].Seq)
+	}
+}
+
+func TestScriptRouteRefusesNull(t *testing.T) {
+	s := &Server{Rules: []Rule{{Answer: "kept"}}}
+	out := httptest.NewRecorder()
+	s.Handler().ServeHTTP(out, httptest.NewRequest(http.MethodPut, "/sim/llm/script", strings.NewReader(`null`)))
+	if out.Code != 400 || len(s.Rules) != 1 {
+		t.Fatal(out.Code, out.Body.String(), s.Rules)
+	}
+	out = httptest.NewRecorder()
+	s.Handler().ServeHTTP(out, httptest.NewRequest(http.MethodPut, "/sim/llm/script", strings.NewReader(`[]`)))
+	if out.Code != 200 || len(s.Rules) != 0 {
+		t.Fatal(out.Code, out.Body.String(), s.Rules)
+	}
+}

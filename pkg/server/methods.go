@@ -627,8 +627,10 @@ func parseKeyboard(raw string) (*botapi.InlineKeyboardMarkup, string) {
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		return nil, ""
 	}
+	lines := 0
 	if raw, ok := fields["keyboard"]; ok {
-		if _, _, problem := keyboardRows(raw); problem != "" {
+		var problem string
+		if _, lines, problem = keyboardRows(raw); problem != "" {
 			return nil, problem
 		}
 	}
@@ -638,6 +640,11 @@ func parseKeyboard(raw string) (*botapi.InlineKeyboardMarkup, string) {
 	}
 	if trimmed := strings.TrimSpace(string(value)); !strings.HasPrefix(trimmed, "[") {
 		return nil, inlineKeyboardNotArray
+	}
+	// A keyboard with rows is the markup, and an inline keyboard beside it is
+	// not, even when TDLib then drops every reply button.
+	if lines > 0 {
+		return nil, ""
 	}
 	var kb botapi.InlineKeyboardMarkup
 	if err := json.Unmarshal([]byte(raw), &kb); err != nil || len(kb.InlineKeyboard) == 0 {

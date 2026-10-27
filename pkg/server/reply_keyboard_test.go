@@ -179,3 +179,21 @@ func TestReplyKeyboardRefusalsAndEmptyButtons(t *testing.T) {
 		t.Fatalf("a keyboard of empty buttons is no markup at all: %+v %+v", v.ReplyKeyboard, v.ForceReply)
 	}
 }
+
+// A keyboard with rows is the whole markup: an inline keyboard sent beside it
+// is not kept on the message, even when TDLib then drops every reply button.
+func TestReplyKeyboardWinsOverInlineKeyboard(t *testing.T) {
+	s := newStand(t, Options{})
+	for i, keyboard := range []string{`[["A"]]`, `[[""]]`} {
+		status, body := s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {`{"keyboard":` + keyboard + `,"inline_keyboard":[[{"text":"B","callback_data":"b"}]]}`}})
+		if status != 200 || result(t, body)["reply_markup"] != nil {
+			t.Fatalf("%s: %d %v", keyboard, status, body)
+		}
+		if m := s.fake.Chat(4242).Messages[i]; len(m.Keyboard) != 0 {
+			t.Fatalf("%s: the message kept the inline keyboard: %+v", keyboard, m.Keyboard)
+		}
+	}
+	if v := s.fake.Chat(4242); v.ReplyKeyboard == nil || v.ReplyKeyboard.Keyboard[0][0].Text != "A" {
+		t.Fatalf("reply keyboard: %+v", v.ReplyKeyboard)
+	}
+}
