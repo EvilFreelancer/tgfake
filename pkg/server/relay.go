@@ -73,7 +73,7 @@ func (s *Server) deleteMessages(w http.ResponseWriter, method string, params url
 	}
 	for _, id := range ids {
 		if message := chat.byID[id]; message != nil {
-			message.deleted = true
+			chat.deleteLocked(message)
 		}
 	}
 	s.mu.Unlock()

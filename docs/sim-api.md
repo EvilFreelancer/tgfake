@@ -563,7 +563,7 @@ typed response.
 Only text buttons are simulated. Special KeyboardButton actions are ignored;
 use text-only keyboards in tests. `selective` is preserved but the current
 menu, hidden flag and outstanding ForceReply are chat-wide, including groups.
-`/sim/reset` removes all these chat controls. Returned views are snapshots.
+`/sim/reset` removes all these chat controls, and the bot's deletion of the message that installed the menu or asked with ForceReply removes that control. Returned views are snapshots.
 
 ## Addressed network faults
 

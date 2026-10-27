@@ -14,6 +14,7 @@ import (
 type chatState struct {
 	replyKeyboard  *botapi.ReplyKeyboardMarkup
 	keyboardHidden bool
+	keyboardMsgID  int // the message that installed replyKeyboard
 	forceReply     *ForceReplyView
 	id             int64
 	typ            string

@@ -152,7 +152,7 @@ A scope names its chat by integer id, given as a number or a string of digits, o
 
 ## Payments
 
-`sendInvoice` stores an invoice message. Its `total_amount` is the sum of the `prices`, the title is cut to 64 characters and the description to 255, as Telegram cuts them, and the `payload` is kept for the pre-checkout query and the payment service message: it is not part of the wire `Invoice` object, as on Telegram. An invoice can be forwarded but not copied, and its text cannot be edited.
+`sendInvoice` stores an invoice message. Its `total_amount` is the sum of the `prices`, the title is cut to 64 characters and the description to 255, as Telegram cuts them, and the `payload` is kept for the pre-checkout query and the payment service message: it is not part of the wire `Invoice` object, as on Telegram. An invoice can be forwarded but not copied, and its text cannot be edited. An invoice sent without a keyboard (or with an empty one) carries Telegram's own Pay button in `reply_markup`, as api.telegram.org returns it: `{"inline_keyboard":[[{"text":"Pay ⭐️150","pay":true}]]}`. Telegram writes that label in a language of its choosing (seen live as `Заплатить ⭐️1`); the stand writes English, `Pay ⭐️<total>` for Stars and otherwise `Pay <total> <currency>` with the total scaled by the currency's exponent from Telegram's [currencies.json](https://core.telegram.org/bots/payments/currencies.json), `Pay 1.50 USD`. Find the button by `pay`, not by its text.
 
 The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_checkout_query`. The query carries the currency, the total and the payload of the invoice itself, so a bot that re-checks the price against its own catalogue meets whatever the invoice said - including a price that has moved on since. The query takes exactly one answer: `answerPreCheckoutQuery` refuses the second one the way it refuses a query it never issued. Confirming one with `ok=true` appends a `successful_payment` service message to the chat and queues it, as Telegram does once the money is taken; refusing one takes no money and delivers nothing. `POST /sim/payment` delivers a payment service message of its own, for a charge taken elsewhere and for a `refunded_payment`. On the chat page an invoice shows its Pay button, Telegram's own when its keyboard has none, and a tap on it is `POST /sim/invoice/pay`.
 
@@ -327,7 +327,9 @@ hints; the page uses its own compact button layout. `ForceReply` stores its
 message ID and placeholder independently of the menu. The browser addresses
 the next typed response to that message, and a keyboard press does the same;
 the resulting update has `reply_to_message`. A matching reply clears the
-outstanding request.
+outstanding request. Deleting the message that installed the menu, or the one
+that asked with `ForceReply`, takes that control away, as TDLib clears a
+chat's reply markup together with its message.
 These controls are exposed in `ChatView`, not added to Telegram's returned
 `Message.reply_markup`, whose public Go type remains the inline keyboard.
 

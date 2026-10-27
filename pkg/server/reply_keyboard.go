@@ -75,7 +75,7 @@ func (c *chatState) applyReplyMarkupLocked(raw string, stored *storedMessage) {
 	keyboard, remove, force := replyControls(raw)
 	switch {
 	case keyboard != nil:
-		c.replyKeyboard, c.keyboardHidden = keyboard, false
+		c.replyKeyboard, c.keyboardHidden, c.keyboardMsgID = keyboard, false, stored.msg.MessageID
 		stored.replyKeyboard = cloneReplyKeyboard(keyboard)
 	case remove != nil:
 		c.replyKeyboard, c.keyboardHidden = nil, false
@@ -148,6 +148,20 @@ func keyboardButtonText(raw json.RawMessage) (text, problem string) {
 
 func isNull(raw json.RawMessage) bool {
 	return strings.TrimSpace(string(raw)) == "null"
+}
+
+// deleteLocked marks a message deleted. Deleting the message whose reply
+// keyboard or ForceReply the chat shows takes that control away, the way
+// TDLib clears a chat's reply markup together with its message.
+func (c *chatState) deleteLocked(m *storedMessage) {
+	m.deleted = true
+	id := m.msg.MessageID
+	if c.replyKeyboard != nil && c.keyboardMsgID == id {
+		c.replyKeyboard, c.keyboardHidden = nil, false
+	}
+	if c.forceReply != nil && c.forceReply.MessageID == id {
+		c.forceReply = nil
+	}
 }
 
 // KeyboardPress selects a zero-based row and column of the active reply menu.

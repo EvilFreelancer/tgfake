@@ -197,3 +197,29 @@ func TestReplyKeyboardWinsOverInlineKeyboard(t *testing.T) {
 		t.Fatalf("reply keyboard: %+v", v.ReplyKeyboard)
 	}
 }
+
+// Deleting the message whose reply keyboard or ForceReply the chat shows takes
+// that control away, as TDLib clears a chat's reply markup with its message.
+func TestDeletingTheMessageTakesItsReplyControlAway(t *testing.T) {
+	s := newStand(t, Options{})
+	for _, markup := range []string{`{"keyboard":[["A"]]}`, `{"force_reply":true}`, ``} {
+		if status, body := s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {markup}}); status != 200 {
+			t.Fatalf("send %s: %d %v", markup, status, body)
+		}
+	}
+	s.call("deleteMessage", url.Values{"chat_id": {"4242"}, "message_id": {"3"}})
+	if v := s.fake.Chat(4242); v.ReplyKeyboard == nil || v.ForceReply == nil {
+		t.Fatalf("an unrelated deletion took a control away: %+v %+v", v.ReplyKeyboard, v.ForceReply)
+	}
+	s.call("deleteMessage", url.Values{"chat_id": {"4242"}, "message_id": {"2"}})
+	if v := s.fake.Chat(4242); v.ForceReply != nil || v.ReplyKeyboard == nil {
+		t.Fatalf("after deleting the ForceReply: %+v %+v", v.ReplyKeyboard, v.ForceReply)
+	}
+	s.call("deleteMessages", url.Values{"chat_id": {"4242"}, "message_ids": {"[1]"}})
+	if v := s.fake.Chat(4242); v.ReplyKeyboard != nil || v.KeyboardHidden {
+		t.Fatalf("after deleting the keyboard: %+v hidden %v", v.ReplyKeyboard, v.KeyboardHidden)
+	}
+	if status, _ := s.sim("POST", "/sim/keyboard/press", map[string]any{"row": 0, "column": 0}); status != 404 {
+		t.Fatalf("a press after the deletion: %d", status)
+	}
+}

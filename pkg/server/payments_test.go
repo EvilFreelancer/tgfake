@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -90,6 +91,35 @@ func TestSendInvoice_Refusals(t *testing.T) {
 				t.Fatal("a refused invoice must not reach the chat")
 			}
 		})
+	}
+}
+
+// An invoice sent without a keyboard carries Telegram's own Pay button, the one
+// api.telegram.org returns in reply_markup (seen live as "Заплатить ⭐️1" for a
+// Russian-speaking owner; the stand writes it in English).
+func TestSendInvoice_WithoutAKeyboardCarriesThePayButton(t *testing.T) {
+	s := newStand(t, Options{})
+	cases := []struct{ currency, provider, prices, markup, want string }{
+		{"XTR", "", `[{"label":"Premium","amount":150}]`, "", "Pay ⭐️150"},
+		{"XTR", "", `[{"label":"Premium","amount":1}]`, `{"keyboard":[]}`, "Pay ⭐️1"},
+		{"USD", "test-provider", `[{"label":"Fee","amount":150}]`, `{"inline_keyboard":[]}`, "Pay 1.50 USD"},
+		{"JPY", "test-provider", `[{"label":"Fee","amount":150}]`, "", "Pay 150 JPY"},
+		{"BHD", "test-provider", `[{"label":"Fee","amount":1500}]`, "", "Pay 1.500 BHD"},
+	}
+	for _, c := range cases {
+		form := starsInvoiceForm()
+		form.Set("currency", c.currency)
+		form.Set("provider_token", c.provider)
+		form.Set("prices", c.prices)
+		form.Set("reply_markup", c.markup)
+		status, body := s.call("sendInvoice", form)
+		if status != http.StatusOK {
+			t.Fatalf("%s: %d %v", c.want, status, body)
+		}
+		raw, _ := json.Marshal(result(t, body)["reply_markup"])
+		if want := `{"inline_keyboard":[[{"pay":true,"text":"` + c.want + `"}]]}`; string(raw) != want {
+			t.Errorf("reply_markup %s, want %s", raw, want)
+		}
 	}
 }
 

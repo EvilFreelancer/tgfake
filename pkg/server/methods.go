@@ -389,7 +389,7 @@ func (s *Server) deleteMessage(w http.ResponseWriter, method string, params url.
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message to delete not found", 0)
 		return
 	}
-	target.deleted = true
+	chat.deleteLocked(target)
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)
 }
