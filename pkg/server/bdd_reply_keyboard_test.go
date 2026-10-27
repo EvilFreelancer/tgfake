@@ -73,6 +73,12 @@ func TestReplyKeyboardFeature(t *testing.T) {
 				_, err := send(map[string]any{"remove_keyboard": true})
 				return err
 			})
+			sc.When(`^the bot deletes the message with the reply keyboard$`, func() error {
+				if status, body := stand.call("deleteMessage", url.Values{"chat_id": {"4242"}, "message_id": {"1"}}); status != 200 {
+					return fmt.Errorf("deleteMessage: %d %v", status, body)
+				}
+				return nil
+			})
 			sc.When(`^the person presses "([^"]*)"$`, func(label string) error {
 				menu := stand.fake.Chat(4242).ReplyKeyboard
 				if menu == nil {

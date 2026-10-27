@@ -32,6 +32,11 @@ Feature: The person answers through the bot's reply keyboard
     Then the bot receives the message "Wallet" as a reply to that request
     And the chat no longer waits for a reply
 
+  Scenario: Deleting the message that installed the keyboard takes it away
+    When the bot deletes the message with the reply keyboard
+    Then a press of the first button is refused
+    And the bot receives no update
+
   Scenario: ReplyKeyboardRemove takes the keyboard away
     When the bot removes the reply keyboard
     Then a press of the first button is refused

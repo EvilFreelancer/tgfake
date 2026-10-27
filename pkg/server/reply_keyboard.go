@@ -175,7 +175,8 @@ type KeyboardPress struct {
 }
 
 // PressKeyboard sends an ordinary message as the selected user. A hidden
-// one-time menu can be reopened; only ReplyKeyboardRemove destroys it.
+// one-time menu can be reopened until ReplyKeyboardRemove, another reply
+// keyboard or the deletion of the message that installed it takes it away.
 func (s *Server) PressKeyboard(in KeyboardPress) (updateID, messageID int, err error) {
 	message := IncomingMessage{ChatID: in.ChatID, UserID: in.UserID, Username: in.Username, FirstName: in.FirstName}
 	message.normalize()
