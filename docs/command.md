@@ -86,7 +86,7 @@ In this mode an omitted `--token` becomes `123456:SERVERLESS`; this token authen
 Once the listener is bound the command prints a banner to stdout:
 
 ```text
-tgfake v1.3.1: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
+tgfake v1.4.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
   Bot API:    http://127.0.0.1:18790/bot<token>/<method>  (in place of https://api.telegram.org)
   chat page:  http://127.0.0.1:18790/
   sim API:    http://127.0.0.1:18790/sim/
