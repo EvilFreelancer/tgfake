@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -109,6 +110,68 @@ func TestBotFlagsSetTheIdentityGetMeReports(t *testing.T) {
 	result, _ := c.botCall("getMe", nil)["result"].(map[string]any)
 	if result["username"] != "echo_bot" || result["first_name"] != "Echo Bot" {
 		t.Fatalf("getMe = %v", result)
+	}
+}
+
+func TestLLMDiagnosticsScriptAndCombinedReset(t *testing.T) {
+	c := startCommand(t, "--llm", "--llm-script", "../../examples/dialogbot/script.json", "--llm-client-header", "X-Test-Client")
+	invoke := func() string {
+		t.Helper()
+		req, err := http.NewRequest("POST", c.origin+"/v1/chat/completions", strings.NewReader(`{"model":"agent","messages":[{"role":"user","content":"same"}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Test-Client", "alice")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		raw, _ := io.ReadAll(res.Body)
+		if res.StatusCode != 200 {
+			t.Fatal(res.StatusCode, string(raw))
+		}
+		return string(raw)
+	}
+	if body := invoke(); !strings.Contains(body, "Which style?") {
+		t.Fatal(body)
+	}
+	post := func(path string) map[string]any {
+		t.Helper()
+		res, err := http.Post(c.origin+path, "application/json", strings.NewReader(`{"text":"hi"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		var body map[string]any
+		if err = json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	first := post("/sim/message")["update_id"].(float64)
+	post("/sim/reset")
+	second := post("/sim/message")["update_id"].(float64)
+	if second <= first {
+		t.Fatal("combined reset rewound Telegram update IDs")
+	}
+	if body := invoke(); !strings.Contains(body, "Which style?") {
+		t.Fatal("combined reset did not rewind LLM", body)
+	}
+	res, err := http.Get(c.origin + "/sim/llm/log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	var log struct {
+		Count   int
+		Entries []llmstub.Entry
+	}
+	if err = json.NewDecoder(res.Body).Decode(&log); err != nil {
+		t.Fatal(err)
+	}
+	if log.Count != 1 || log.Entries[0].Client != "alice" || log.Entries[0].Seq < 2 {
+		t.Fatal(log)
 	}
 }
 

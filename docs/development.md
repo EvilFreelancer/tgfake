@@ -68,6 +68,7 @@ The happy path of a feature is a Gherkin scenario in `features/`, and a godog ha
 
 | Spec | Harness |
 |------|---------|
+| [`features/dialog_bot.feature`](../features/dialog_bot.feature) | [`examples/dialogbot/main_test.go`](../examples/dialogbot/main_test.go), a complete offline dialog over HTTP. |
 | [`features/command.feature`](../features/command.feature) | [`cmd/tgfake/bdd_command_test.go`](../cmd/tgfake/bdd_command_test.go), against `run` on a free port. |
 | [`features/update_lifecycle.feature`](../features/update_lifecycle.feature) | [`pkg/server/bdd_lifecycle_test.go`](../pkg/server/bdd_lifecycle_test.go), with the server's clock under the test's control. |
 | [`features/mini_app.feature`](../features/mini_app.feature) | [`pkg/server/bdd_mini_app_test.go`](../pkg/server/bdd_mini_app_test.go). |

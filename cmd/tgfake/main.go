@@ -68,6 +68,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	llmModel := fs.String("llm-model", llmstub.DefaultModel, "model id the scripted model reports")
 	llmScript := fs.String("llm-script", "", "JSON file with [{\"match\": \"...\", \"answer\": \"...\"}] rules; a rule with \"tool\": {\"name\": ..., \"arguments\": {...}} calls that tool first and answers its result")
 	llmDelay := fs.Duration("llm-delay", 50*time.Millisecond, "pause between streamed chunks")
+	llmClientHeader := fs.String("llm-client-header", "", "HTTP header selecting an LLM scenario client instead of request.user")
 	llmChunk := fs.Int("llm-chunk-words", 1, "words per streamed chunk")
 	var llmAnswers, llmStripTags stringList
 	fs.Var(&llmAnswers, "llm-answer", "a canned answer, used in turn; repeatable")
@@ -113,13 +114,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	var stub *llmstub.Server
 	if *llm {
-		stub = &llmstub.Server{Model: *llmModel, Answers: llmAnswers, Delay: *llmDelay, ChunkWords: *llmChunk, StripTags: llmStripTags}
+		stub = &llmstub.Server{ClientHeader: *llmClientHeader, Model: *llmModel, Answers: llmAnswers, Delay: *llmDelay, ChunkWords: *llmChunk, StripTags: llmStripTags}
 		if *llmScript != "" {
 			rules, err := loadRules(*llmScript)
 			if err != nil {
 				return err
 			}
-			stub.Rules = rules
+			if err := stub.SetRules(rules); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -221,6 +224,8 @@ func newMux(fake *server.Server, stub *llmstub.Server) http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", stub.Handler())
+	mux.Handle("/sim/llm/", stub.Handler())
+	mux.HandleFunc("POST /sim/reset", func(w http.ResponseWriter, r *http.Request) { stub.Reset(); fake.Handler().ServeHTTP(w, r) })
 	mux.Handle("/", fake.Handler())
 	return mux
 }

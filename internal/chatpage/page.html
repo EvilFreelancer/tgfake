@@ -102,6 +102,9 @@
   <form class="send" id="inlineForm"><input id="inlineText" placeholder="inline query"><button>Search</button><button type="button" id="inlineClose">Close</button></form>
   <div id="inlineResults"></div>
 </div>
+  <div id="replyPrompt" role="status"></div>
+  <button type="button" id="keyboardToggle" hidden>Reply keyboard</button>
+  <div id="replyKeyboard" hidden></div>
   <form class="send" id="sendForm">
   <button type="button" id="inlineButton" hidden>Inline</button>
     <button type="button" id="menuButton" hidden title="The bot's menu button opens its Mini App"></button>
@@ -184,6 +187,8 @@
   const num = (id) => Number($(id).value) || 0;
   let lastSeq = 0;
   let inlineID = '';
+ let replyTo = 0, keyboardKey = '', keyboardOpen = true;
+ $('keyboardToggle').addEventListener('click', () => { keyboardOpen = !keyboardOpen; $('replyKeyboard').hidden = !keyboardOpen; });
 
   async function post(path, body) {
     const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -196,7 +201,7 @@
     const text = $('text').value.trim();
     if (!text) return;
     await post('/sim/message', { chat_id: num('chat'), user_id: num('user'), username: $('username').value,
-      chat_type: $('ctype').value, text, mention: $('mention').checked });
+      chat_type: $('ctype').value, text, reply_to_message_id: replyTo, mention: $('mention').checked });
     $('text').value = '';
     refreshChat();
   });
@@ -289,6 +294,28 @@
   async function refreshChat() {
     const chatID = num('chat');
     const v = await (await fetch('/sim/chat/' + chatID)).json();
+    replyTo = v.force_reply ? v.force_reply.message_id : 0;
+    $('replyPrompt').textContent = replyTo ? 'Reply to #' + replyTo : '';
+    $('text').placeholder = (v.force_reply && v.force_reply.input_field_placeholder) || (v.reply_keyboard && v.reply_keyboard.input_field_placeholder) || 'message or /command';
+    const keyboard = $('replyKeyboard');
+    keyboard.textContent = '';
+    $('keyboardToggle').hidden = !v.reply_keyboard;
+    const nextKey = JSON.stringify([chatID, num('user'), v.reply_keyboard, !!v.keyboard_hidden]);
+    if (nextKey !== keyboardKey) { keyboardOpen = !v.keyboard_hidden; keyboardKey = nextKey; }
+    keyboard.hidden = !v.reply_keyboard || !keyboardOpen;
+    if (v.reply_keyboard) v.reply_keyboard.keyboard.forEach((row, ri) => {
+      const line = el('div', 'keyboard-row');
+      row.forEach((button, ci) => {
+        const b = el('button', '', button.text); b.type = 'button';
+        b.addEventListener('click', async () => {
+          const response = await post('/sim/keyboard/press', {chat_id: chatID, user_id: num('user'), username: $('username').value, row: ri, column: ci});
+          if (response.ok && v.reply_keyboard.one_time_keyboard) { keyboardOpen = false; keyboard.hidden = true; }
+          refreshChat();
+        });
+        line.appendChild(b);
+      });
+      keyboard.appendChild(line);
+    });
     const log = $('log');
     const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
     log.textContent = '';

@@ -12,30 +12,36 @@ import (
 // message in order, the drafts being streamed and what the bot did around
 // them.
 type chatState struct {
-	id        int64
-	typ       string
-	title     string
-	user      *botapi.User // the person on the other side of a private chat
-	nextMsgID int
-	messages  []*storedMessage
-	byID      map[int]*storedMessage
-	drafts    map[int64]*draft
-	lastTyped time.Time
-	callbacks []CallbackAnswer
-	info      map[string]any
-	members   map[int64]map[string]any
+	replyKeyboard  *botapi.ReplyKeyboardMarkup
+	keyboardHidden bool
+	forceReply     *ForceReplyView
+	id             int64
+	typ            string
+	title          string
+	user           *botapi.User // the person on the other side of a private chat
+	nextMsgID      int
+	messages       []*storedMessage
+	byID           map[int]*storedMessage
+	drafts         map[int64]*draft
+	lastTyped      time.Time
+	callbacks      []CallbackAnswer
+	info           map[string]any
+	members        map[int64]map[string]any
 }
 
 // storedMessage is a message plus what the transcript view wants to know
 // about it.
 type storedMessage struct {
-	msg       botapi.Message
-	fromBot   bool
-	parseMode string
-	edited    bool
-	deleted   bool
-	rich      bool
-	file      *storedFile // the upload a photo or document message carries
+	replyKeyboard  *botapi.ReplyKeyboardMarkup
+	removeKeyboard *botapi.ReplyKeyboardRemove
+	forceReply     *ForceReplyView
+	msg            botapi.Message
+	fromBot        bool
+	parseMode      string
+	edited         bool
+	deleted        bool
+	rich           bool
+	file           *storedFile // the upload a photo or document message carries
 	// invoicePayload is the payload the bot gave sendInvoice. It is not part
 	// of the wire Invoice object; the pre-checkout query and the payment
 	// service message carry it back to the bot.
@@ -190,13 +196,16 @@ func (m *storedMessage) button(label string) *botapi.InlineKeyboardButton {
 
 // ChatView is a chat as the simulation API and the page show it.
 type ChatView struct {
-	ChatID    int64            `json:"chat_id"`
-	Type      string           `json:"type"`
-	Title     string           `json:"title,omitempty"`
-	Typing    bool             `json:"typing"`
-	Messages  []MessageView    `json:"messages"`
-	Drafts    []DraftView      `json:"drafts"`
-	Callbacks []CallbackAnswer `json:"callbacks"`
+	ReplyKeyboard  *botapi.ReplyKeyboardMarkup `json:"reply_keyboard,omitempty"`
+	KeyboardHidden bool                        `json:"keyboard_hidden,omitempty"`
+	ForceReply     *ForceReplyView             `json:"force_reply,omitempty"`
+	ChatID         int64                       `json:"chat_id"`
+	Type           string                      `json:"type"`
+	Title          string                      `json:"title,omitempty"`
+	Typing         bool                        `json:"typing"`
+	Messages       []MessageView               `json:"messages"`
+	Drafts         []DraftView                 `json:"drafts"`
+	Callbacks      []CallbackAnswer            `json:"callbacks"`
 	// MenuButton is the menu button the chat shows: its own, else the bot's.
 	MenuButton *botapi.MenuButton `json:"menu_button,omitempty"`
 }
@@ -225,6 +234,9 @@ func (v ChatView) FindButton(label string) (messageID int, data string, ok bool)
 
 // MessageView is one message of a ChatView.
 type MessageView struct {
+	ReplyKeyboard     *botapi.ReplyKeyboardMarkup     `json:"reply_keyboard,omitempty"`
+	RemoveKeyboard    *botapi.ReplyKeyboardRemove     `json:"remove_keyboard,omitempty"`
+	ForceReply        *ForceReplyView                 `json:"force_reply,omitempty"`
 	MessageID         int                             `json:"message_id"`
 	From              string                          `json:"from"` // "bot" or "user"
 	Username          string                          `json:"username,omitempty"`
@@ -311,24 +323,30 @@ func (s *Server) Chat(id int64) ChatView {
 func (c *chatState) view(now time.Time) ChatView {
 	c.expireDraftsLocked(now)
 	v := ChatView{
-		ChatID:    c.id,
-		Type:      c.typ,
-		Title:     c.title,
-		Typing:    !c.lastTyped.IsZero() && now.Sub(c.lastTyped) < typingWindow,
-		Messages:  make([]MessageView, 0, len(c.messages)),
-		Drafts:    make([]DraftView, 0, len(c.drafts)),
-		Callbacks: append([]CallbackAnswer{}, c.callbacks...),
+		ReplyKeyboard:  cloneReplyKeyboard(c.replyKeyboard),
+		KeyboardHidden: c.keyboardHidden,
+		ForceReply:     copyPointer(c.forceReply),
+		ChatID:         c.id,
+		Type:           c.typ,
+		Title:          c.title,
+		Typing:         !c.lastTyped.IsZero() && now.Sub(c.lastTyped) < typingWindow,
+		Messages:       make([]MessageView, 0, len(c.messages)),
+		Drafts:         make([]DraftView, 0, len(c.drafts)),
+		Callbacks:      append([]CallbackAnswer{}, c.callbacks...),
 	}
 	for _, m := range c.messages {
 		mv := MessageView{
-			MessageID: m.msg.MessageID,
-			From:      "user",
-			Text:      m.msg.Text,
-			Caption:   m.msg.Caption,
-			ParseMode: m.parseMode,
-			Edited:    m.edited,
-			Deleted:   m.deleted,
-			Rich:      m.rich,
+			ReplyKeyboard:  cloneReplyKeyboard(m.replyKeyboard),
+			RemoveKeyboard: copyPointer(m.removeKeyboard),
+			ForceReply:     copyPointer(m.forceReply),
+			MessageID:      m.msg.MessageID,
+			From:           "user",
+			Text:           m.msg.Text,
+			Caption:        m.msg.Caption,
+			ParseMode:      m.parseMode,
+			Edited:         m.edited,
+			Deleted:        m.deleted,
+			Rich:           m.rich,
 		}
 		wire := m.clone()
 		mv.Location, mv.Contact, mv.Venue, mv.WebAppData, mv.MediaGroupID, mv.ForwardOrigin = wire.Location, wire.Contact, wire.Venue, wire.WebAppData, wire.MediaGroupID, wire.ForwardOrigin
@@ -481,6 +499,18 @@ func (v ChatView) Text() string {
 			}
 			sb.WriteString("\n")
 		}
+	}
+	if v.ReplyKeyboard != nil {
+		sb.WriteString("reply keyboard:\n")
+		for _, row := range v.ReplyKeyboard.Keyboard {
+			for _, b := range row {
+				sb.WriteString(" [" + b.Text + "]")
+			}
+			sb.WriteString("\n")
+		}
+	}
+	if v.ForceReply != nil {
+		sb.WriteString("force reply to #" + itoa(v.ForceReply.MessageID) + "\n")
 	}
 	for _, d := range v.Drafts {
 		sb.WriteString("draft " + itoa(int(d.DraftID)) + " (rev " + itoa(d.Revisions) + "): " + strings.ReplaceAll(d.Markdown, "\n", "\n    ") + "\n")

@@ -534,3 +534,95 @@ curl -s -X POST $O/sim/message -d '{"text": "are you back?"}' > /dev/null
 ```
 
 The outbox shows how often the bot polled during the outage, which is how its back-off can be checked, and the transcript shows whether it recovered. A fault with `times` ends an outage on its own after that many calls.
+
+## POST /sim/keyboard/press
+
+Press an ordinary text button of the chat's current reply keyboard. This
+creates a `message` update, with the selected user's identity, rather than a
+`callback_query`. Fields are `chat_id`, `user_id`, `username`, `first_name`,
+`row` and `column`; identity defaults match `/sim/message`. Indices start at
+zero. The chat's history and update queue remain unchanged if there is no
+active keyboard or the position is out of range (404 with `error`).
+
+```bash
+curl -s -X POST "$O/sim/keyboard/press" \
+  -d '{"chat_id":4242,"user_id":77,"username":"bob","row":0,"column":1}'
+```
+
+The response is `{update_id, message_id}`. A hidden one-time menu is still
+active and can be pressed again; a removed menu cannot. `/sim/callback` is
+exclusively for inline keyboards. `ChatView` exposes `reply_keyboard`,
+`keyboard_hidden` and `force_reply` (markup plus `message_id`). Message views
+retain their own `reply_keyboard`, `remove_keyboard` and `force_reply` for
+inspection. Ordinary typed responses use `/sim/message` with
+`reply_to_message_id`; ForceReply does not automatically rewrite API inputs.
+The browser chooses that ID for the next typed response.
+
+Only text buttons are simulated. Special KeyboardButton actions are ignored;
+use text-only keyboards in tests. `selective` is preserved but the current
+menu, hidden flag and outstanding ForceReply are chat-wide, including groups.
+`/sim/reset` removes all these chat controls. Returned views are snapshots.
+
+## Addressed network faults
+
+Existing `/sim/fault` payloads retain their behavior. New fields are additive:
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `chat_id` | 0 | Exact numeric chat ID for Bot API parameters. Zero matches any chat. |
+| `target` | empty | Empty targets Bot API methods. `file` targets authenticated `/file/bot<token>/...` downloads only. |
+| `path` | empty | Exact relative download path, such as `photo/file-1`; empty matches any file. |
+| `delay_ms` | 0 | Delay in milliseconds, cancellable by the client or `Server.Close`. |
+| `disconnect` | false | Abort the HTTP connection/stream without a response. |
+| `after_apply` | false | Run the operation before delaying or losing its response. |
+
+For a delay-only or disconnect rule, omit `code` to continue the operation or
+abort it as requested. A legacy rule without network fields and without `code`
+still defaults to 500. With an explicit code, a pre-apply delay is followed by
+that HTTP error. `after_apply` uses only delay/disconnect, ignoring `code`;
+validation errors still return normally and are never marked applied.
+
+```json
+{"method":"sendMessage","chat_id":111,"code":403}
+```
+
+```json
+{"target":"file","path":"photo/file-1","disconnect":true,"times":1}
+```
+
+```json
+{"method":"sendMessage","chat_id":111,"disconnect":true,"after_apply":true,"times":1}
+```
+
+Token/path parsing runs before fault matching. Bot faults are chosen after
+authentication and parameter parsing, before method validation; exact method
+wins over `*`, with all specified chat/contains filters ANDed. There remains
+one rule per method, newest wins. File rules have their own single slot,
+independent of the Bot API catch-all; file authentication and existence checks
+run first. For files, `contains` searches `path` and `file_id`. File download
+URLs do not identify a chat, so `chat_id` cannot match them. Read-only
+simulation file previews are unaffected. Clear a file rule with
+`{"target":"file","clear":true}` or `ClearFault("file:*")`; DELETE clears all.
+
+Matched rules are reserved/count down before delay, including cancelled
+attempts. No mutex is held while waiting. Delays of different chats are
+independent. A pre-apply fault changes no chat state. `after_apply` explicitly
+permits an ambiguous outcome: `sendMessage` is in history although the caller
+gets a network error. Retrying it can create a duplicate; no exactly-once
+semantics are implied. A download is read-only; "applied" means it reached
+the successful read path.
+
+Outbox calls add `fault`, `applied` and `response_sent`. Status 0 and response
+null mean no response was written after a disconnect/cancel. A successful
+write only means Go accepted the write, not proof the remote client received
+it. Faulted downloads are logged as method `file` without binary bytes.
+Unfaulted downloads retain their existing behavior and are not added to the
+Bot API outbox. A rule's delay includes cancelled attempts in diagnostics.
+
+## LLM diagnostics
+
+With `--llm`, `/sim/llm/log`, `/sim/llm/script` and `/sim/llm/reset` expose the
+independent scripted model's journal, configuration and cursor reset. See
+[scripted-model.md](scripted-model.md#journal-and-reset) for methods and fields.
+The command's `/sim/reset` resets both components while preserving Telegram's
+monotonically increasing update IDs.

@@ -72,9 +72,29 @@ func (s *Server) serveFile(w http.ResponseWriter, req *http.Request) {
 		s.writeError(w, "", nil, 404, "Not Found", 0)
 		return
 	}
+	params := url.Values{"path": {relative}, "file_id": {f.id}}
+	fault := s.takeFileFault(params)
+	var handled bool
+	w, handled = s.beginFault(w, req, "file", params, fault)
+	if handled {
+		return
+	}
+	if fw, ok := w.(*faultWriter); ok {
+		if fault.AfterApply && !fw.wait() {
+			fw.record("file", params, 0, nil, true, false)
+			panic(http.ErrAbortHandler)
+		}
+		if fault.AfterApply && fault.Disconnect {
+			fw.record("file", params, 0, nil, true, false)
+			panic(http.ErrAbortHandler)
+		}
+	}
 	w.Header().Set("Content-Type", f.mimeType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(f.data)))
-	_, _ = w.Write(f.data)
+	_, err := w.Write(f.data)
+	if fw, ok := w.(*faultWriter); ok {
+		fw.record("file", params, 200, nil, true, err == nil)
+	}
 }
 
 // resolveMedia reads an upload, attach reference, known file id or HTTP URL.
@@ -238,6 +258,7 @@ func (s *Server) sendMedia(w http.ResponseWriter, req *http.Request, method stri
 	}
 	attachFile(msg, f, params)
 	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	stored.file = f
 	result := stored.clone()
 	s.mu.Unlock()

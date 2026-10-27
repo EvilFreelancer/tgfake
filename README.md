@@ -3,7 +3,7 @@
 **tgfake server** is a fake Telegram Bot API for testing bots offline. It
 answers the Bot API methods a bot calls, keeps the chats the bot writes to,
 and lets a test, a CI job or a person at a browser play the user: send
-messages, tap inline buttons, open Mini Apps, and make Telegram fail on
+messages, tap reply and inline buttons, open Mini Apps, and make Telegram fail on
 purpose. No token, no phone, no network.
 
 ![The chat page: the person's side of the conversation on the left, the bot's keyboard as buttons, every Bot API call the bot made on the right](docs/assets/chat-page.png)
@@ -24,7 +24,8 @@ purpose. No token, no phone, no network.
 - **The person's side, scriptable.** A [simulation API](docs/sim-api.md)
   under `/sim/` injects text, media, inline queries, Mini App data and taps,
   selects inline results, configures chats and members, returns the transcript and every
-  Bot API call, schedules faults such as a 429 flood or an outage, and opens
+  Bot API call, schedules chat-scoped HTTP errors, delays and lost responses for the Bot API
+  and file downloads, and opens
   Mini Apps with launch data signed by the bot's token.
 - **A chat page.** `http://127.0.0.1:18790/` is a Telegram client for the
   bot: type messages, tap buttons, open Mini Apps in a phone frame and watch
@@ -34,7 +35,10 @@ purpose. No token, no phone, no network.
   can be checked at the width a Telegram user sees it.
 - **A scripted model.** `--llm` also serves an OpenAI-compatible
   `/v1/chat/completions` that answers by rule, in turn or by echo, streams
-  word by word and can call a tool, so an LLM bot runs with no key.
+  word by word and can call tools, so an LLM bot runs with no key. Named
+  sequences isolate clients, match model/system/tools, and script provider
+  errors with a request journal. The self-contained
+  [dialog bot example](examples/dialogbot) exercises a guarded tool dialog.
 - **Local Telegram Serverless.** `--serverless <project>` runs `tgcloud/`
   JavaScript handlers and authenticated Mini App endpoints in Docker, with
   the platform SDK and a shared SQLite database. Node.js stays in the

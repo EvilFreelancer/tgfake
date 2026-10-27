@@ -87,6 +87,12 @@ func (in *IncomingMessage) normalize() {
 // becomes the next update. It returns the update id and the message id.
 func (s *Server) InjectMessage(in IncomingMessage) (updateID, messageID int) {
 	in.normalize()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.injectMessageLocked(in)
+}
+
+func (s *Server) injectMessageLocked(in IncomingMessage) (updateID, messageID int) {
 	from := &botapi.User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username}
 	text := in.Text
 	var entities []botapi.MessageEntity
@@ -99,8 +105,6 @@ func (s *Server) InjectMessage(in IncomingMessage) (updateID, messageID int) {
 		entities = append(entities, botapi.MessageEntity{Type: "bot_command", Offset: 0, Length: utf16Len(m)})
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	chat := s.ensureChatLocked(in.ChatID, in.ChatType, in.ChatTitle, from)
 	msg := &botapi.Message{
 		From:     from,
@@ -113,6 +117,12 @@ func (s *Server) InjectMessage(in IncomingMessage) (updateID, messageID int) {
 		if target := chat.byID[in.ReplyToMessageID]; target != nil {
 			msg.ReplyToMessage = target.quoted()
 		}
+	}
+	if chat.replyKeyboard != nil && chat.replyKeyboard.OneTimeKeyboard {
+		chat.keyboardHidden = true
+	}
+	if chat.forceReply != nil && in.ReplyToMessageID == chat.forceReply.MessageID {
+		chat.forceReply = nil
 	}
 	stored := chat.appendLocked(msg, false, "", false)
 	upd := s.pushUpdateLocked(botapi.Update{Message: stored.clone()})

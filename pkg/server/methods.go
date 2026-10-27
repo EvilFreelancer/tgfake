@@ -43,8 +43,9 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.token = token
 		s.mu.Unlock()
 	}
-	if fault := s.takeFault(method, params); fault != nil {
-		s.writeError(w, method, params, fault.Code, fault.Description, fault.RetryAfter)
+	var handled bool
+	w, handled = s.beginFault(w, r, method, params, s.takeFault(method, params))
+	if handled {
 		return
 	}
 	switch strings.ToLower(method) {
@@ -271,6 +272,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 	msg.ReplyMarkup = markup
 	msg.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)
@@ -475,6 +477,7 @@ func (s *Server) sendRichMessage(w http.ResponseWriter, method string, params ur
 	}
 	msg.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(msg, true, "", true)
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)
@@ -537,6 +540,10 @@ func (s *Server) writeError(w http.ResponseWriter, method string, params url.Val
 }
 
 func (s *Server) respond(w http.ResponseWriter, method string, params url.Values, status int, body []byte) {
+	if fw, ok := w.(*faultWriter); ok {
+		fw.respond(method, params, status, body)
+		return
+	}
 	if method != "" {
 		s.mu.Lock()
 		s.recordLocked(method, params, status, body)
@@ -604,7 +611,8 @@ func replyTargetLocked(chat *chatState, params url.Values) (*botapi.Message, str
 // inline_keyboard with a value that is not an array.
 const inlineKeyboardNotArray = `Bad Request: field "inline_keyboard" must be of type Array`
 
-// parseKeyboard reads reply_markup; a markup of another kind (a reply
+// parseKeyboard reads the inline part of reply_markup. Other controls are
+// stored separately by applyReplyMarkupLocked. A markup of another kind (a reply
 // keyboard, a remove) is not an inline keyboard and reads as none, and so does
 // an empty array. An inline_keyboard of any other type, null included, is
 // refused the way the Bot API server refuses it: that null is what a library

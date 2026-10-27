@@ -288,6 +288,28 @@ The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate
 - Payments go no further than a bot can see: a payment provider, shipping, order info and `order_info` on the pre-checkout query and the payment are not modelled, `shipping_query` is never sent, and a charge can only be taken or returned - never left pending. `is_ephemeral` of a command is kept but a message is never ephemeral.
 - Media thumbnails, codec validation, live locations, full Telegram membership/permission enforcement and service-message copy restrictions other than an invoice's are not modelled. Inline media edits currently resolve uploads as ordinary edits; Telegram permits only existing ids and URLs for inline targets.
 - Formatting: `parse_mode` is not parsed, so `can't parse entities` never happens on its own. Schedule a fault with `contains` to see it ([sim-api.md](sim-api.md#faults)).
-- Reply keyboards (`keyboard`, `remove_keyboard`, `force_reply`) are accepted and dropped, not shown.
+- Reply keyboards support ordinary text buttons. Contact/location/poll requests and other special button actions are not simulated. `selective` is retained but not scoped to individual group members; the menu and ForceReply request are chat-wide.
 - Rate limits are not enforced. A `429` happens only when a fault is scheduled.
 - Two concurrent polls are answered from the same queue; only the polling/webhook conflict is implemented.
+
+## Reply keyboards and requested replies
+
+Successful sends keep `ReplyKeyboardMarkup` as chat state, with `keyboard`,
+`resize_keyboard`, `one_time_keyboard`, `is_persistent` and
+`input_field_placeholder`. An ordinary message or an inline keyboard leaves
+that menu installed. `ReplyKeyboardRemove` removes it immediately; an old
+button then fails simulation with 404 and no update. Inline callbacks retain
+their separate meaning.
+
+`one_time_keyboard` hides the menu after an incoming text message, preserving
+its buttons. The chat page's "Reply keyboard" button reopens it. The Go and
+simulation press APIs can press a hidden menu. Resize/persistence flags are
+retained as presentation hints; the page uses its own compact button layout.
+`ForceReply` stores its message ID and placeholder independently of the menu.
+The browser addresses the next typed response to that message; the resulting
+update has `reply_to_message`. A matching reply clears the outstanding request.
+These controls are exposed in `ChatView`, not added to Telegram's returned
+`Message.reply_markup`, whose public Go type remains the inline keyboard.
+
+See [the simulation press route](sim-api.md#post-simkeyboardpress) and the
+[official markup definitions](https://core.telegram.org/bots/api#replykeyboardmarkup).

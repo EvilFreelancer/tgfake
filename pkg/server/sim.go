@@ -29,6 +29,7 @@ import (
 //	DELETE /sim/fault
 //	POST /sim/reset
 func (s *Server) registerSim(mux *http.ServeMux) {
+	mux.HandleFunc("POST /sim/keyboard/press", s.simKeyboardPress)
 	mux.HandleFunc("POST /sim/message", s.simMessage)
 	mux.HandleFunc("POST /sim/callback", s.simCallback)
 	mux.HandleFunc("POST /sim/draft/stop", s.simDraftStop)
@@ -236,7 +237,11 @@ func (s *Server) simFault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Clear {
-		s.ClearFault(in.Method)
+		method := in.Method
+		if in.Target == "file" {
+			method = "file:*"
+		}
+		s.ClearFault(method)
 	} else {
 		s.SetFault(in.Fault)
 	}

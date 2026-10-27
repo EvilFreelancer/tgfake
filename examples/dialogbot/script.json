@@ -1,0 +1,17 @@
+[
+  {
+    "name": "guard",
+    "model": "guard",
+    "repeat_last": true,
+    "steps": [{"answer": "{\"allow\":true}"}]
+  },
+  {
+    "name": "agent",
+    "model": "agent",
+    "steps": [
+      {"answer": "Which style?"},
+      {"tool_calls": [{"name": "generate_image", "arguments": {"style": "blue"}}]},
+      {"tool_name": "generate_image", "tool_result": "ready", "answer": "Image ready. What should change?"}
+    ]
+  }
+]

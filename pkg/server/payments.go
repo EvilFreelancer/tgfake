@@ -108,6 +108,7 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 		HasProtectedContent: truthy(params.Get("protect_content")),
 	}
 	stored := chat.appendLocked(msg, true, "", false)
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	stored.invoicePayload = params.Get("payload")
 	result := stored.clone()
 	s.mu.Unlock()

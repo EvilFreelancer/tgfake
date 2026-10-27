@@ -296,3 +296,40 @@ model := &llmstub.Server{
 	StripTags: []string{"turn_context"},
 }
 ```
+
+## Dialog testing APIs
+
+`fake.PressKeyboard(server.KeyboardPress{ChatID: 4242, UserID: 77, Row: 0,
+Column: 1})` returns `(updateID, messageID, error)` and sends an ordinary
+message. It never creates an update on an invalid position. Chat views expose
+`ReplyKeyboard`, `KeyboardHidden` and `ForceReply`; message views retain the
+individual markup. `botapi` exports `KeyboardButton`, `ReplyKeyboardMarkup`,
+`ReplyKeyboardRemove` and `ForceReply`. The existing inline `Message.ReplyMarkup`
+Go type remains unchanged. See [bot-api.md](bot-api.md#reply-keyboards-and-requested-replies)
+for supported markup and group limitations.
+
+`server.Fault` adds `ChatID`, `Target`, `Path`, `DelayMS`, `Disconnect` and
+`AfterApply`. `Call.Fault`, `Call.Applied` and `Call.ResponseSent` describe the
+outcome. Call `Close()` before shutting down the HTTP listener to cancel waits.
+See [sim-api.md](sim-api.md#addressed-network-faults) for scope and precedence.
+
+`llmstub.Rule` embeds `Filters` and adds `Name`, `Steps []Step` and `RepeatLast`.
+`Step` configures text/tool responses, usage, tool-result matching and provider
+faults. `Server.ClientHeader` overrides request `user` with a nonsecret test
+header. Configure public fields before serving. `SetRules` safely copies and
+replaces a script, rejects implicit malformed responses and resets cursors.
+`Log()` returns an independent ordered `[]Entry`; `ClearLog()` preserves
+cursors/counters; `Reset()` clears log/cursors and rewinds legacy canned-answer
+rotation while keeping completion IDs increasing. `Calls()` includes scripted
+failures. `Answer(prompt)` remains the legacy prompt-only API; structured
+filters and sequences are selected through HTTP. Stop in-flight requests before
+resetting tests. Mount `model.Handler()` at both `/v1/` and `/sim/llm/` to expose
+its diagnostic routes; reset independently mounted Telegram and LLM servers
+explicitly. The command wires those resets together.
+
+Run [`examples/dialogbot`](../examples/dialogbot) to exercise the complete
+reply-menu, guard, clarification, tool-result and ForceReply path over HTTP:
+
+```bash
+go run ./examples/dialogbot
+```
