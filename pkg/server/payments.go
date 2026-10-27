@@ -134,9 +134,10 @@ func invoiceFieldProblem(params url.Values) string {
 }
 
 // invoiceLimitProblem refuses an invoice Telegram refuses once it has read
-// it: a title of nothing but spaces, a payload past 128 bytes, a currency
-// other than Telegram Stars with no payment provider, and an invoice in Stars
-// whose prices are not exactly one item.
+// it: a title of nothing but spaces, a payload past 128 bytes, and an invoice
+// in Stars whose prices are not exactly one item. A currency other than Stars
+// with no payment provider is refused too, stricter than Telegram - see
+// "Strict where Telegram is strict".
 func invoiceLimitProblem(params url.Values, prices []botapi.LabeledPrice) string {
 	switch {
 	case strings.TrimSpace(params.Get("title")) == "":

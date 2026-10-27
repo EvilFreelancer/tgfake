@@ -320,8 +320,9 @@ func tidyCommands(cmds []botapi.BotCommand) ([]botapi.BotCommand, string) {
 		}
 		out = append(out, cmd)
 	}
-	// Telegram itself then refuses a command with anything but lower-case
-	// Latin letters, digits and underscores.
+	// Stricter than Telegram, which keeps the name: the Bot API states the
+	// alphabet for BotCommand.command and the stand refuses a name outside it
+	// where the bot registers it. See "Strict where Telegram is strict".
 	for _, cmd := range out {
 		for _, r := range cmd.Command {
 			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {

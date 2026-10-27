@@ -186,7 +186,11 @@ The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_che
 
 ## Strict where Telegram is strict
 
-The stand refuses what api.telegram.org refuses, with the HTTP status as `error_code` and the description in Telegram's wording, so the mistake shows up in the test and not in a user's chat. Every refusal is a 400 unless stated otherwise. One rule is stricter than Telegram on purpose: a button with more than one action, which Telegram reads as its first, is refused so an ambiguous keyboard never passes.
+The stand refuses what api.telegram.org refuses, with the HTTP status as `error_code` and the description in Telegram's wording, so the mistake shows up in the test and not in a user's chat. Every refusal is a 400 unless stated otherwise. Three rules are stricter than Telegram on purpose, and the table marks each of them "stricter than Telegram":
+
+- a button with more than one action, which Telegram reads as its first, is refused so an ambiguous keyboard never passes;
+- an invoice outside Telegram Stars with an empty `provider_token` is refused. `api.telegram.org` takes the call without reading the token as required - the Bot API says it comes from @BotFather and an empty one is for Stars alone - so the stand refuses it at `sendInvoice`, where the bot can fix it;
+- a command holding anything but lower-case Latin letters, digits and `_` is refused. The server keeps such a name - `setMyCommands` trims it, drops a leading `/` and stops at 32 characters - but the Bot API states that alphabet for `BotCommand.command`, so the stand refuses it at `setMyCommands`, where the bot registers it.
 
 | Call | Refused when | Description |
 |------|--------------|-------------|
@@ -198,7 +202,7 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | `setMyCommands` | `commands` is not JSON / not an array | `Bad Request: can't parse commands JSON object` / `Bad Request: expected an Array of BotCommand` |
 | same | a command is not an object, or has no `command` or `description` | `Bad Request: can't parse BotCommand: expected an Object` / `...: Can't find field "command"` / `...: Can't find field "description"` |
 | same | after trimming and dropping a leading `/`, a command is empty or past 32 characters | `Bad Request: command must be non-empty` / `Bad Request: command length must not exceed 32` |
-| same | a command holds anything but lower-case Latin letters, digits and `_` | `Bad Request: BOT_COMMAND_INVALID` |
+| same | a command holds anything but lower-case Latin letters, digits and `_` (stricter than Telegram, see above) | `Bad Request: BOT_COMMAND_INVALID` |
 | same | after trimming, a description is empty or past 256 characters | `Bad Request: command description must be non-empty` / `Bad Request: command description length must not exceed 256` |
 | `setMyCommands`, `getMyCommands`, `deleteMyCommands` | `scope` is not JSON / not a JSON object | `Bad Request: can't parse BotCommandScope JSON object` / `Bad Request: can't parse BotCommandScope: BotCommandScope must be an Object` |
 | same | `scope.type` is missing / not a string / not one of the seven the Bot API defines | `Bad Request: can't parse BotCommandScope: Can't find field "type"` / `...: Field "type" must be of type String` / `...: Unsupported type specified` |
@@ -239,7 +243,7 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | same | the total of the prices is zero or negative / past 999999999999 | `Bad Request: total price must be positive` / `Bad Request: total price is too big` |
 | same | `title` is nothing but spaces | `Bad Request: INVOICE_TITLE_INVALID` |
 | same | `payload` is past 128 bytes | `Bad Request: INVOICE_PAYLOAD_INVALID` |
-| same | `currency` is not `XTR` and `provider_token` is empty | `Bad Request: PAYMENT_PROVIDER_INVALID` |
+| same | `currency` is not `XTR` and `provider_token` is empty (stricter than Telegram, see above) | `Bad Request: PAYMENT_PROVIDER_INVALID` |
 | same | `currency` is `XTR` and `prices` does not hold exactly one item | `Bad Request: STARS_INVOICE_INVALID` |
 | same | a keyboard has no Pay button / has a Pay button that is not the one and only first button of the first row | `Bad Request: REPLY_MARKUP_BUY_EMPTY` / `Bad Request: BUTTON_POS_INVALID` |
 | `editMessageText` | the message is an invoice | `Bad Request: message can't be edited` |
