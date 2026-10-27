@@ -436,3 +436,31 @@ func TestCredentialHeaderCannotBecomeLoggedClientKey(t *testing.T) {
 		t.Fatal(status, s.Log())
 	}
 }
+
+func TestCancelledProviderFailureKeepsOutstandingToolCalls(t *testing.T) {
+	s := &Server{Rules: []Rule{{Name: "agent", Steps: []Step{
+		{ToolCalls: []ToolCall{{Name: "lookup", ID: "call-1"}}},
+		{Status: 503, DelayMS: 1000},
+		{ToolName: "lookup", ToolResult: "ready", Answer: "recovered"},
+	}}}}
+	handler := s.Handler()
+	tools := `"tools":[{"type":"function","function":{"name":"lookup"}}]`
+	out := httptest.NewRecorder()
+	handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"user":"a",`+tools+`}`)))
+	if out.Code != 200 || !strings.Contains(out.Body.String(), `"id":"call-1"`) {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	result := `{"user":"a",` + tools + `,"messages":[{"role":"tool","tool_call_id":"call-1","content":"ready"}]}`
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	out = httptest.NewRecorder()
+	handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(result)).WithContext(ctx))
+	if log := s.Log(); len(log) != 2 || !log[1].Cancelled {
+		t.Fatal(log)
+	}
+	out = httptest.NewRecorder()
+	handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(result)))
+	if out.Code != 200 || !strings.Contains(out.Body.String(), "recovered") {
+		t.Fatal(out.Code, out.Body.String())
+	}
+}

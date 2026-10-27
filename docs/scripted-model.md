@@ -246,6 +246,10 @@ without holding the scenario mutex. Its journal status is 499 with
 `cancelled: true` when cancellation is observed; 499 is diagnostic only.
 Cancellation consumes the step and clears its pending tool results because
 the client did not receive those tool calls. A retry can use the next step.
+A failing step (a `status` of 400 or above, `raw_body` or `empty_choices`),
+cancelled or not, delivers no completion, so it leaves the outstanding tool
+calls in place: the retry carries the same tool results and the next step,
+for example one with `tool_name`, still checks them.
 
 Extended rules support non-streaming requests. A matching streamed request
 gets 409 without consuming a step. Legacy text/tool streaming remains

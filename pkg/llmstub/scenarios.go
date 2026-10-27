@@ -101,6 +101,12 @@ func (r chatRequest) offers(name string) bool {
 	return false
 }
 
+// fails reports whether the step answers with a provider failure rather than
+// a completion: an error status, a raw body or no choices.
+func (s Step) fails() bool {
+	return s.Status >= 400 || s.RawBody != nil || s.EmptyChoices
+}
+
 func (r Rule) extended() bool {
 	return r.Name != "" || r.Steps != nil || r.Model != "" || r.System != "" || r.Profile != "" || r.User != "" || r.Tools != nil || r.HasTools != nil
 }
@@ -171,8 +177,13 @@ func (s *Server) selectStep(req chatRequest, profile, client string) (step Step,
 			}
 			pending[tool.ID] = tool.Name
 		}
-		c.pending = pending
 		c.index++
+		// A failed provider response delivers nothing: the client retries
+		// with the same tool results, which the next step still needs.
+		if step.fails() {
+			return step, entry, true, "", nil
+		}
+		c.pending = pending
 		c.reservation = entry.Seq
 		seq := entry.Seq
 		abandon = func() {
