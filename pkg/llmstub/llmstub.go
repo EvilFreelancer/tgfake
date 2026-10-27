@@ -17,22 +17,25 @@ import (
 )
 
 // Rule maps a request to an answer or an independent sequence of Steps.
-// Optional Filters are ANDed; a named sequence has a cursor per explicit client.
-// Legacy rules keep their original behavior: the first Match in the
-// last user message (case-insensitive) wins; an empty Match matches all.
+// The legacy fields keep their positions, so a keyed Rule literal from an
+// older version still compiles and behaves the same. Optional Filters are
+// ANDed; a named sequence has a cursor per explicit client. Legacy rules
+// keep their original behavior: the first Match in the last user message
+// (case-insensitive) wins; an empty Match matches all.
 //
 // A rule with a Tool makes the model act before it answers: the first request
 // of the turn gets the tool call, and the request that carries the tool's
 // result gets Answer. That is enough to script a turn that starts work - a
 // background command, a gated tool that asks for permission - without a model.
 type Rule struct {
+	Match      string    `json:"match"`
+	Answer     string    `json:"answer"`
+	Tool       *ToolCall `json:"tool,omitempty"`
+
 	Filters
 	Name       string    `json:"name,omitempty"`
 	Steps      []Step    `json:"steps,omitempty"`
 	RepeatLast bool      `json:"repeat_last,omitempty"`
-	Match      string    `json:"match"`
-	Answer     string    `json:"answer"`
-	Tool       *ToolCall `json:"tool,omitempty"`
 }
 
 // ToolCall is the call a Rule makes. Arguments is the JSON object the tool is
