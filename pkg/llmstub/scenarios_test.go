@@ -610,3 +610,27 @@ func TestStreamedNamedScenarioIsRefusedWithoutConsumingAStep(t *testing.T) {
 		t.Fatal("the refused stream consumed a step:", body)
 	}
 }
+
+// An empty journal is an empty list, in Go and on the wire, before the first
+// completion and after a clear or a reset.
+func TestEmptyJournalIsAnEmptyList(t *testing.T) {
+	s := &Server{}
+	handler := s.Handler()
+	check := func(when string) {
+		t.Helper()
+		if log := s.Log(); log == nil || len(log) != 0 {
+			t.Errorf("%s: Log() = %#v", when, log)
+		}
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, httptest.NewRequest(http.MethodGet, "/sim/llm/log", nil))
+		if !strings.Contains(out.Body.String(), `"entries":[]`) {
+			t.Errorf("%s: %s", when, out.Body.String())
+		}
+	}
+	check("before any completion")
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`)))
+	s.ClearLog()
+	check("after ClearLog")
+	s.Reset()
+	check("after Reset")
+}
