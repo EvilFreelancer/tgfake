@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/EvilFreelancer/tgfake/pkg/botapi"
 )
@@ -27,39 +28,38 @@ func cloneReplyKeyboard(k *botapi.ReplyKeyboardMarkup) *botapi.ReplyKeyboardMark
 }
 
 // applyReplyMarkupLocked keeps the reply-keyboard side of a sent message's
-// reply_markup, read the way the Bot API server reads it: a button is an
-// object with its text or the text alone, and a markup is one kind only - a
-// keyboard with rows, else an inline keyboard (none of these controls), else
-// remove_keyboard (or its old name hide_keyboard), else force_reply. It is
-// called only after a successful outgoing send.
+// reply_markup, read the way the Bot API server reads it (get_reply_markup):
+// a markup is one kind only - a keyboard with rows, else an inline keyboard
+// (none of these controls), else remove_keyboard (or its old name
+// hide_keyboard), else force_reply. A keyboard whose buttons all lack text is
+// no markup at all, as in TDLib. parseKeyboard has refused a keyboard that
+// cannot be read; this is called only after a successful outgoing send.
 func (c *chatState) applyReplyMarkupLocked(raw string, stored *storedMessage) {
 	var markup struct {
 		botapi.ReplyKeyboardMarkup
-		Keyboard       [][]json.RawMessage `json:"keyboard"`
-		InlineKeyboard []json.RawMessage   `json:"inline_keyboard"`
-		RemoveKeyboard bool                `json:"remove_keyboard"`
-		HideKeyboard   bool                `json:"hide_keyboard"`
-		ForceReply     bool                `json:"force_reply"`
+		Keyboard       json.RawMessage   `json:"keyboard"`
+		InlineKeyboard []json.RawMessage `json:"inline_keyboard"`
+		RemoveKeyboard bool              `json:"remove_keyboard"`
+		HideKeyboard   bool              `json:"hide_keyboard"`
+		ForceReply     bool              `json:"force_reply"`
 	}
 	if json.Unmarshal([]byte(raw), &markup) != nil {
 		return
 	}
 	keyboard := markup.ReplyKeyboardMarkup
-	for _, row := range markup.Keyboard {
-		buttons := make([]botapi.KeyboardButton, 0, len(row))
-		for _, b := range row {
-			var button botapi.KeyboardButton
-			if json.Unmarshal(b, &button.Text) != nil && json.Unmarshal(b, &button) != nil {
-				return
-			}
-			buttons = append(buttons, button)
+	rows := 0
+	if markup.Keyboard != nil {
+		var problem string
+		if keyboard.Keyboard, rows, problem = keyboardRows(markup.Keyboard); problem != "" {
+			return
 		}
-		keyboard.Keyboard = append(keyboard.Keyboard, buttons)
 	}
 	switch {
-	case len(keyboard.Keyboard) > 0:
-		c.replyKeyboard, c.keyboardHidden = &keyboard, false
-		stored.replyKeyboard = cloneReplyKeyboard(&keyboard)
+	case rows > 0:
+		if len(keyboard.Keyboard) > 0 {
+			c.replyKeyboard, c.keyboardHidden = &keyboard, false
+			stored.replyKeyboard = cloneReplyKeyboard(&keyboard)
+		}
 	case len(markup.InlineKeyboard) > 0:
 		// An inline keyboard leaves the reply keyboard and ForceReply alone.
 	case markup.RemoveKeyboard || markup.HideKeyboard:
@@ -70,6 +70,70 @@ func (c *chatState) applyReplyMarkupLocked(raw string, stored *storedMessage) {
 		c.forceReply = &ForceReplyView{ForceReply: force, MessageID: stored.msg.MessageID}
 		stored.forceReply = copyPointer(c.forceReply)
 	}
+}
+
+// keyboardRows reads the keyboard field of reply_markup the way the Bot API
+// server does (get_array, get_keyboard_button): an array of rows, a null row
+// read as an empty one, and a button that is its text or an object with a
+// text, a number counting as text. TDLib then drops the buttons without text
+// and the rows left empty. lines is the number of rows the field had, which
+// makes the markup a keyboard; problem is the Bot API's refusal.
+func keyboardRows(raw json.RawMessage) (keyboard [][]botapi.KeyboardButton, lines int, problem string) {
+	var rows []json.RawMessage
+	if isNull(raw) || json.Unmarshal(raw, &rows) != nil {
+		return nil, 0, `Bad Request: field "keyboard" must be of type Array`
+	}
+	for _, row := range rows {
+		var buttons []json.RawMessage
+		if !isNull(row) && json.Unmarshal(row, &buttons) != nil {
+			return nil, 0, "Bad Request: expected an Array of KeyboardButton"
+		}
+		var kept []botapi.KeyboardButton
+		for _, button := range buttons {
+			text, problem := keyboardButtonText(button)
+			if problem != "" {
+				return nil, 0, "Bad Request: can't parse KeyboardButton: " + problem
+			}
+			if text != "" {
+				kept = append(kept, botapi.KeyboardButton{Text: text})
+			}
+		}
+		if len(kept) > 0 {
+			keyboard = append(keyboard, kept)
+		}
+	}
+	return keyboard, len(rows), ""
+}
+
+// keyboardButtonText is the text of one reply button, or td's refusal of it.
+func keyboardButtonText(raw json.RawMessage) (text, problem string) {
+	if isNull(raw) {
+		return "", "KeyboardButton must be a String or an Object"
+	}
+	if json.Unmarshal(raw, &text) == nil {
+		return text, ""
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil {
+		return "", "KeyboardButton must be a String or an Object"
+	}
+	value, ok := object["text"]
+	if !ok {
+		return "", `Can't find field "text"`
+	}
+	var number json.Number
+	switch {
+	case isNull(value):
+	case json.Unmarshal(value, &text) == nil:
+		return text, ""
+	case json.Unmarshal(value, &number) == nil:
+		return number.String(), ""
+	}
+	return "", `Field "text" must be of type String`
+}
+
+func isNull(raw json.RawMessage) bool {
+	return strings.TrimSpace(string(raw)) == "null"
 }
 
 // KeyboardPress selects a zero-based row and column of the active reply menu.

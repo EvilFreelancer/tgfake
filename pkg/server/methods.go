@@ -612,8 +612,9 @@ func replyTargetLocked(chat *chatState, params url.Values) (*botapi.Message, str
 const inlineKeyboardNotArray = `Bad Request: field "inline_keyboard" must be of type Array`
 
 // parseKeyboard reads the inline part of reply_markup. Other controls are
-// stored separately by applyReplyMarkupLocked. A markup of another kind (a reply
-// keyboard, a remove) is not an inline keyboard and reads as none, and so does
+// stored separately by applyReplyMarkupLocked, and a reply keyboard the Bot API
+// server cannot parse is refused here in its words (keyboardRows). A markup of
+// another kind (a reply keyboard, a remove) is not an inline keyboard and reads as none, and so does
 // an empty array. An inline_keyboard of any other type, null included, is
 // refused the way the Bot API server refuses it: that null is what a library
 // sends for a keyboard built from no rows, and a real chat never shows the
@@ -625,6 +626,11 @@ func parseKeyboard(raw string) (*botapi.InlineKeyboardMarkup, string) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		return nil, ""
+	}
+	if raw, ok := fields["keyboard"]; ok {
+		if _, _, problem := keyboardRows(raw); problem != "" {
+			return nil, problem
+		}
 	}
 	value, ok := fields["inline_keyboard"]
 	if !ok {

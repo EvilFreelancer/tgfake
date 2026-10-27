@@ -108,7 +108,7 @@ The stand creates `message` (text, incoming media, `web_app_data` or a payment s
 | `timeout` | Seconds to hold the request open while nothing is pending. Missing or `0` answers at once. The wait is capped by `--poll-max` (`Options.MaxPollWait`), 30 s by default. A held request is answered as soon as an update is created, when the wait runs out, or when the server is closed; if the client goes away first, nothing is answered. |
 | `allowed_updates` | A JSON array of kinds. A list replaces the subscription, an empty list `[]` means every kind, and a missing parameter or the literal `null` keeps whatever the previous poll asked for. A value that is not a JSON array is refused with `Bad Request: can't parse allowed_updates JSON array`. |
 
-The subscription is remembered between polls, as Telegram remembers it for the token, and survives `POST /sim/reset`. It is applied when an update is created, not when it is delivered: an update of a kind the subscription excludes at that moment is never queued (its id is still used up), and an update already queued is delivered even if a later poll narrows the subscription. Updates stay pending until a later poll confirms them with its `offset`; a fault scheduled for `getUpdates` answers before the offset is applied, so a failed poll confirms nothing.
+The subscription is remembered between polls, as Telegram remembers it for the token, and survives `POST /sim/reset`. It is applied when an update is created, not when it is delivered: an update of a kind the subscription excludes at that moment is never queued (its id is still used up), and an update already queued is delivered even if a later poll narrows the subscription. Updates stay pending until a later poll confirms them with its `offset`; a fault scheduled for `getUpdates` answers before the offset is applied, so a failed poll confirms nothing, unless it is an `after_apply` fault: that poll confirms its offset and only its answer is lost ([sim-api.md](sim-api.md#addressed-network-faults)).
 
 A message the person sends gets a `bot_command` entity when its text starts with a command (`/start`, `/help@tgfake_bot`), and a `mention` entity when `mention` asked for the bot's `@username` in front of it. With `mention` the text starts with the mention, so it carries no `bot_command` entity. Entity offsets and lengths are counted in UTF-16 code units, as Telegram counts them.
 
@@ -120,9 +120,9 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Replies.** A send replies to a message named by `reply_parameters` (`{"message_id": N, "allow_sending_without_reply": true}`) or by the older `reply_to_message_id` with `allow_sending_without_reply=true`. The answer carries `reply_to_message`, the quoted message without its own quote. A reply to a message that is not in the chat, or was deleted, is refused unless `allow_sending_without_reply` is set, in which case the message goes out unthreaded.
 
-**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat`, `copy_text` or `pay`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md). A `pay` button is the "Pay" button of an invoice: an invoice is sent with a keyboard that leads with one (`Bad Request: REPLY_MARKUP_BUY_EMPTY` when it has none, `Bad Request: BUTTON_POS_INVALID` when it has one elsewhere), while any other message, and any edit of a keyboard, an invoice's included, refuses one with `Bad Request: BUTTON_TYPE_INVALID`.
+**Keyboards.** An inline keyboard is kept on the message. A reply keyboard, `remove_keyboard` and `force_reply` change the chat instead, as [Reply keyboards and requested replies](#reply-keyboards-and-requested-replies) describes, and a message that carries one of them cannot be edited (`Bad Request: message can't be edited`), as in Telegram. An empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat`, `copy_text` or `pay`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md). A `pay` button is the "Pay" button of an invoice: an invoice is sent with a keyboard that leads with one (`Bad Request: REPLY_MARKUP_BUY_EMPTY` when it has none, `Bad Request: BUTTON_POS_INVALID` when it has one elsewhere), while any other message, and any edit of a keyboard, an invoice's included, refuses one with `Bad Request: BUTTON_TYPE_INVALID`.
 
-**Edits.** The bot's own messages and messages sent via this bot can be edited. `editMessageText` replaces text and keyboard (omitted `reply_markup` removes it) and records `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. Caption/media edits use the same target and keyboard rules. An unchanged edit is refused. Keyboard equality includes every supported button action. Inline targets return `true`; ordinary targets return the edited message.
+**Edits.** The bot's own messages and messages sent via this bot can be edited, except one sent with a reply keyboard, `remove_keyboard` or `force_reply`. `editMessageText` replaces text and keyboard (omitted `reply_markup` removes it) and records `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. Caption/media edits use the same target and keyboard rules. An unchanged edit is refused. Keyboard equality includes every supported button action. Inline targets return `true`; ordinary targets return the edited message.
 
 **Deletes.** `deleteMessage` marks a message, the bot's or the person's, as deleted. The text transcript leaves it out, the JSON transcript shows it with `"deleted": true`, and it can no longer be edited, replied to or tapped.
 
@@ -307,7 +307,17 @@ A markup is one kind only, in this order: a `keyboard` with at least one row,
 else an `inline_keyboard`, else `remove_keyboard` (or its old name
 `hide_keyboard`), else `force_reply`. So `{"keyboard":[["A"]],"remove_keyboard":true}`
 installs the keyboard, and an inline keyboard with `"force_reply":true` asks
-for no reply.
+for no reply. A button without text is dropped, and so is a row left empty; a
+keyboard of such buttons alone is no markup at all, as TDLib reads it. A
+keyboard the Bot API server cannot read is refused in its words:
+
+| `keyboard` | Refusal |
+|------------|---------|
+| not an array, `null` included | `Bad Request: field "keyboard" must be of type Array` |
+| a row that is neither an array nor `null` | `Bad Request: expected an Array of KeyboardButton` |
+| a button that is neither a string nor an object | `Bad Request: can't parse KeyboardButton: KeyboardButton must be a String or an Object` |
+| a button object without `text` | `Bad Request: can't parse KeyboardButton: Can't find field "text"` |
+| a `text` that is neither a string nor a number | `Bad Request: can't parse KeyboardButton: Field "text" must be of type String` |
 
 `one_time_keyboard` hides the menu only after one of its buttons is pressed,
 not after an unrelated typed message, and preserves its buttons. The chat

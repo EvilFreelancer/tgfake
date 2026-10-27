@@ -142,3 +142,40 @@ func TestReplyMarkupReadsLikeTheBotAPIServer(t *testing.T) {
 		t.Fatalf("hide_keyboard keeps the keyboard: %+v", v.ReplyKeyboard)
 	}
 }
+
+// A reply keyboard the Bot API server cannot parse is refused in its words
+// (telegram-bot-api get_reply_markup, get_array, get_keyboard_button), and
+// TDLib drops buttons without text and rows left empty.
+func TestReplyKeyboardRefusalsAndEmptyButtons(t *testing.T) {
+	s := newStand(t, Options{})
+	refusals := map[string]string{
+		`{"keyboard":"x"}`:               `Bad Request: field "keyboard" must be of type Array`,
+		`{"keyboard":["x"]}`:             `Bad Request: expected an Array of KeyboardButton`,
+		`{"keyboard":[[1]]}`:             `Bad Request: can't parse KeyboardButton: KeyboardButton must be a String or an Object`,
+		`{"keyboard":[[{}]]}`:            `Bad Request: can't parse KeyboardButton: Can't find field "text"`,
+		`{"keyboard":[[{"text":true}]]}`: `Bad Request: can't parse KeyboardButton: Field "text" must be of type String`,
+	}
+	for markup, want := range refusals {
+		status, body := s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {markup}})
+		if status != 400 || body["description"] != want {
+			t.Errorf("%s: %d %v", markup, status, body)
+		}
+	}
+	if messages := s.fake.Chat(4242).Messages; len(messages) != 0 {
+		t.Fatalf("a refused send was kept: %+v", messages)
+	}
+	send := func(markup string) {
+		t.Helper()
+		if status, body := s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {markup}}); status != 200 {
+			t.Fatalf("send %s: %d %v", markup, status, body)
+		}
+	}
+	send(`{"keyboard":[[{"text":""},"Yes"],[],null,[""]]}`)
+	if v := s.fake.Chat(4242); v.ReplyKeyboard == nil || len(v.ReplyKeyboard.Keyboard) != 1 || len(v.ReplyKeyboard.Keyboard[0]) != 1 {
+		t.Fatalf("empty buttons and rows: %+v", v.ReplyKeyboard)
+	}
+	send(`{"keyboard":[[""]],"force_reply":true}`)
+	if v := s.fake.Chat(4242); v.ReplyKeyboard.Keyboard[0][0].Text != "Yes" || v.ForceReply != nil {
+		t.Fatalf("a keyboard of empty buttons is no markup at all: %+v %+v", v.ReplyKeyboard, v.ForceReply)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -146,4 +147,66 @@ func TestCancelledFileDelayHasNoResponse(t *testing.T) {
 	}()
 	params := url.Values{"path": {"photo/fixture"}}
 	_, _ = s.fake.beginFault(httptest.NewRecorder(), httptest.NewRequest("GET", "/file/bot1/photo/fixture", nil).WithContext(ctx), "file", params, s.fake.takeFileFault(params))
+}
+
+// A webhook reply runs its method outside net/http, where a lost response has
+// no connection to abort: the fault is filed and the stand keeps running.
+func TestDisconnectFaultOnAWebhookReply(t *testing.T) {
+	for _, fault := range []map[string]any{
+		{"method": "sendMessage", "disconnect": true, "times": 1},
+		{"method": "sendMessage", "disconnect": true, "after_apply": true, "times": 1},
+	} {
+		s := newStand(t, Options{})
+		receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			_, _ = io.Copy(io.Discard, req.Body)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"method":"sendMessage","chat_id":4242,"text":"webhook reply"}`))
+		}))
+		s.call("setWebhook", url.Values{"url": {receiver.URL}})
+		s.sim("POST", "/sim/fault", fault)
+		s.fake.InjectMessage(IncomingMessage{Text: "hello"})
+		if !s.fake.WaitCall("sendMessage", 1, time.Second) {
+			t.Fatalf("%v: the webhook reply was not filed", fault)
+		}
+		call := s.fake.Calls("sendMessage")[0]
+		if call.Fault == nil || call.ResponseSent || call.Applied != (fault["after_apply"] == true) {
+			t.Fatalf("%v: %+v", fault, call)
+		}
+		receiver.Close()
+	}
+}
+
+// A message that carries a reply keyboard, its removal or ForceReply cannot be
+// edited: TDLib's can_edit_message refuses any reply_markup but an inline one.
+func TestReplyControlMessagesCannotBeEdited(t *testing.T) {
+	s := newStand(t, Options{})
+	for i, markup := range []string{`{"keyboard":[["A"]]}`, `{"remove_keyboard":true}`, `{"force_reply":true}`} {
+		s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {markup}})
+		id := strconv.Itoa(i + 1)
+		for method, form := range map[string]url.Values{
+			"editMessageText":        {"chat_id": {"4242"}, "message_id": {id}, "text": {"changed"}},
+			"editMessageReplyMarkup": {"chat_id": {"4242"}, "message_id": {id}, "reply_markup": {`{"inline_keyboard":[[{"text":"Go","callback_data":"go"}]]}`}},
+		} {
+			if status, body := s.call(method, form); status != 400 || body["description"] != "Bad Request: message can't be edited" {
+				t.Errorf("%s of %s: %d %v", method, markup, status, body)
+			}
+		}
+	}
+}
+
+// A fault that could never fire is refused instead of turning into another.
+func TestFaultThatCannotFireIsRefused(t *testing.T) {
+	s := newStand(t, Options{})
+	for _, f := range []map[string]any{
+		{"target": "files", "disconnect": true},
+		{"target": "file", "chat_id": 1, "disconnect": true},
+		{"method": "sendMessage", "path": "document/file-1", "code": 500},
+	} {
+		if status, body := s.sim("POST", "/sim/fault", f); status != 400 || body["error"] == nil {
+			t.Errorf("%v: %d %v", f, status, body)
+		}
+	}
+	if faults := s.fake.Faults(); len(faults) != 0 {
+		t.Fatalf("refused faults were scheduled: %+v", faults)
+	}
 }

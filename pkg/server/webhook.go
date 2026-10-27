@@ -232,5 +232,12 @@ func (s *Server) webhookReply(ctx context.Context, token string, body []byte) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// A fault that loses the response aborts with http.ErrAbortHandler, which
+	// only net/http recovers; here there is no connection, the call is filed.
+	defer func() {
+		if v := recover(); v != nil && v != http.ErrAbortHandler {
+			panic(v)
+		}
+	}()
 	s.serveBotAPI(&webhookResponse{header: make(http.Header)}, req)
 }

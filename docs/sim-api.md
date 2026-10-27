@@ -602,7 +602,7 @@ wins over `*`, with all specified chat/contains filters ANDed. There remains
 one rule per method, newest wins. File rules have their own single slot,
 independent of the Bot API catch-all; file authentication and existence checks
 run first. For files, `contains` searches `path` and `file_id`. File download
-URLs do not identify a chat, so `chat_id` cannot match them. Read-only
+URLs do not identify a chat, so `chat_id` cannot match them. A rule that could never fire is refused with 400 and `error` and nothing is scheduled: a `target` other than empty or `file`, `chat_id` on a file rule, or `path` on a Bot API rule. Read-only
 simulation file previews are unaffected. Clear a file rule with
 `{"target":"file","clear":true}` or `ClearFault("file:*")`; DELETE clears all.
 

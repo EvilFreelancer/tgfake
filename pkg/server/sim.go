@@ -13,6 +13,7 @@ import (
 // chat would be. It injects what a user does and reads back what the bot did.
 //
 //	POST /sim/message           {chat_id, chat_type, user_id, username, text, reply_to_message_id, mention}
+//	POST /sim/keyboard/press    {chat_id, user_id, username, first_name, row, column}
 //	POST /sim/callback          {chat_id, user_id, message_id, data} or {chat_id, label}
 //	POST /sim/draft/stop        {chat_id, draft_id}
 //	POST /sim/invoice/pay       {chat_id, message_id, user_id, username, first_name}
@@ -25,7 +26,7 @@ import (
 //	GET  /sim/state
 //	POST /sim/webapp/launch     {chat_id, user_id, username, first_name, url, start_param, color_scheme, platform, version}
 //	GET  /sim/webapp/theme/{light|dark}
-//	POST /sim/fault             {method, code, description, retry_after, times} or {method, clear: true}
+//	POST /sim/fault             {method, code, description, retry_after, times, contains, chat_id, target, path, delay_ms, disconnect, after_apply} or {method | target, clear: true}
 //	DELETE /sim/fault
 //	POST /sim/reset
 func (s *Server) registerSim(mux *http.ServeMux) {
@@ -234,6 +235,18 @@ func (s *Server) simFault(w http.ResponseWriter, r *http.Request) {
 		Clear bool `json:"clear"`
 	}
 	if !readJSON(w, r, &in) {
+		return
+	}
+	// A rule that could never fire would quietly become another one.
+	switch {
+	case in.Target != "" && in.Target != "file":
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "target is empty for Bot API methods or file for downloads"})
+		return
+	case in.Target == "file" && in.ChatID != 0:
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "a download names no chat, so chat_id cannot match it"})
+		return
+	case in.Target == "" && in.Path != "":
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path matches downloads only, with target file"})
 		return
 	}
 	if in.Clear {

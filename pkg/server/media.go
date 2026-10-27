@@ -491,5 +491,9 @@ func (s *Server) editTargetLocked(params url.Values) (*storedMessage, bool, stri
 	if !target.fromBot && target.msg.ViaBot == nil {
 		return nil, false, "Bad Request: message can't be edited"
 	}
+	// Telegram edits no message whose reply_markup is anything but inline.
+	if target.replyKeyboard != nil || target.removeKeyboard != nil || target.forceReply != nil {
+		return nil, false, "Bad Request: message can't be edited"
+	}
 	return target, false, ""
 }
