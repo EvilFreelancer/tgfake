@@ -159,9 +159,10 @@ func answerCheckout(stand *stand, id, ok, message string) error {
 }
 
 func lastInvoice(stand *stand) *botapi.Invoice {
-	for _, m := range stand.fake.Chat(4242).Messages {
-		if m.Invoice != nil {
-			return m.Invoice
+	messages := stand.fake.Chat(4242).Messages
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Invoice != nil {
+			return messages[i].Invoice
 		}
 	}
 	return nil

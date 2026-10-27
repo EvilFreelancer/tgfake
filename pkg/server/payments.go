@@ -214,22 +214,27 @@ func parsePrices(raw string) ([]botapi.LabeledPrice, string) {
 // invoiceKeyboardProblem refuses a keyboard Telegram would not put under an
 // invoice: Telegram shows a Pay button of its own when there is no keyboard,
 // and a keyboard has to lead with one - REPLY_MARKUP_BUY_EMPTY when it has
-// none, BUTTON_POS_INVALID when it has one elsewhere.
+// none, BUTTON_POS_INVALID when the Pay button is not the one and only first
+// button of the first row, which is where a Pay button always is.
 func invoiceKeyboardProblem(markup *botapi.InlineKeyboardMarkup) string {
 	if markup == nil || len(markup.InlineKeyboard) == 0 {
 		return ""
 	}
-	if first := markup.InlineKeyboard[0]; len(first) > 0 && first[0].Pay {
-		return ""
-	}
+	pays := 0
 	for _, row := range markup.InlineKeyboard {
 		for _, b := range row {
 			if b.Pay {
-				return "Bad Request: BUTTON_POS_INVALID"
+				pays++
 			}
 		}
 	}
-	return "Bad Request: REPLY_MARKUP_BUY_EMPTY"
+	if pays == 0 {
+		return "Bad Request: REPLY_MARKUP_BUY_EMPTY"
+	}
+	if first := markup.InlineKeyboard[0]; pays > 1 || len(first) == 0 || !first[0].Pay {
+		return "Bad Request: BUTTON_POS_INVALID"
+	}
+	return ""
 }
 
 func (s *Server) answerPreCheckoutQuery(w http.ResponseWriter, method string, params url.Values) {

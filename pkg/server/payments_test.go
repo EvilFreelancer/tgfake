@@ -69,6 +69,12 @@ func TestSendInvoice_Refusals(t *testing.T) {
 		{"a keyboard with the Pay button on the second row", func(f url.Values) {
 			f.Set("reply_markup", `{"inline_keyboard":[[{"text":"Cancel","callback_data":"cancel"}],[{"text":"Pay","pay":true}]]}`)
 		}, "Bad Request: BUTTON_POS_INVALID"},
+		{"a keyboard with a second Pay button", func(f url.Values) {
+			f.Set("reply_markup", `{"inline_keyboard":[[{"text":"Pay","pay":true},{"text":"Again","pay":true}]]}`)
+		}, "Bad Request: BUTTON_POS_INVALID"},
+		{"a keyboard with a Pay button under the first row", func(f url.Values) {
+			f.Set("reply_markup", `{"inline_keyboard":[[{"text":"Pay","pay":true}],[{"text":"Again","pay":true}]]}`)
+		}, "Bad Request: BUTTON_POS_INVALID"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
