@@ -427,7 +427,8 @@ func (s *Server) journal(entry Entry) {
 // It holds the newest 1000 entries; GET /sim/llm/log counts the dropped ones.
 func (s *Server) Log() []Entry {
 	s.mu.Lock()
-	entries := append([]Entry(nil), s.entries...)
+	// Never nil: an empty journal is [] on the wire, not null.
+	entries := append([]Entry{}, s.entries...)
 	s.mu.Unlock()
 	// Stored entries are never changed, so the deep copy needs no lock.
 	raw, _ := json.Marshal(entries)
