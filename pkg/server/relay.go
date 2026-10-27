@@ -73,7 +73,7 @@ func (s *Server) deleteMessages(w http.ResponseWriter, method string, params url
 	}
 	for _, id := range ids {
 		if message := chat.byID[id]; message != nil {
-			message.deleted = true
+			chat.deleteLocked(message)
 		}
 	}
 	s.mu.Unlock()
@@ -182,6 +182,9 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 			}
 		}
 		stored := chat.appendLocked(copy, true, original.parseMode, original.rich)
+		if !bulk && !forward {
+			chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
+		}
 		stored.file = original.file
 		stored.invoicePayload = original.invoicePayload
 		sent = stored.clone()
@@ -256,6 +259,7 @@ func (s *Server) sendContent(w http.ResponseWriter, method string, params url.Va
 	message.From, message.Chat, message.Date, message.ReplyToMessage, message.ReplyMarkup = s.botUser(), chat.wire(), s.now().Unix(), quoted, markup
 	message.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(message, true, "", false)
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)

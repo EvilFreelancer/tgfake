@@ -16,24 +16,35 @@ import (
 	"time"
 )
 
-// Rule maps a prompt to an answer: the first rule whose Match occurs in the
-// last user message (case-insensitive) wins; an empty Match matches all.
+// Rule maps a request to an answer or an independent sequence of Steps.
+// The legacy fields keep their positions, so a keyed Rule literal from an
+// older version still compiles and behaves the same. Optional Filters are
+// ANDed; a named sequence has a cursor per explicit client. Legacy rules
+// keep their original behavior: the first Match in the last user message
+// (case-insensitive) wins; an empty Match matches all.
 //
 // A rule with a Tool makes the model act before it answers: the first request
 // of the turn gets the tool call, and the request that carries the tool's
 // result gets Answer. That is enough to script a turn that starts work - a
 // background command, a gated tool that asks for permission - without a model.
 type Rule struct {
-	Match  string    `json:"match"`
-	Answer string    `json:"answer"`
-	Tool   *ToolCall `json:"tool,omitempty"`
+	Match      string    `json:"match"`
+	Answer     string    `json:"answer"`
+	Tool       *ToolCall `json:"tool,omitempty"`
+
+	Filters
+	Name       string    `json:"name,omitempty"`
+	Steps      []Step    `json:"steps,omitempty"`
+	RepeatLast bool      `json:"repeat_last,omitempty"`
 }
 
 // ToolCall is the call a Rule makes. Arguments is the JSON object the tool is
 // called with; a script writes it as an object, not as an encoded string.
 type ToolCall struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	ID           string          `json:"id,omitempty"`
+	RawArguments *string         `json:"raw_arguments,omitempty"`
+	Name         string          `json:"name"`
+	Arguments    json.RawMessage `json:"arguments"`
 }
 
 // Server is the scripted model.
@@ -55,16 +66,23 @@ type Server struct {
 	// user message with nothing else in it is skipped. Empty cuts nothing.
 	StripTags []string
 
-	mu    sync.Mutex
-	calls int
+	// ClientHeader selects the explicit client key instead of request.user.
+	ClientHeader string
+	cursors      map[scenarioKey]*cursor
+	entries      []Entry
+	dropped      int
+	answerTurn   int
+	mu           sync.Mutex
+	calls        int
 }
 
 // DefaultModel is the model id a Server with no Model reports.
 const DefaultModel = "tgfake-demo"
 
-// Handler serves the two routes under /v1.
+// Handler serves completions/models under /v1 and diagnostics under /sim/llm.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.registerDiagnostics(mux)
 	mux.HandleFunc("GET /v1/models", s.models)
 	mux.HandleFunc("POST /v1/chat/completions", s.completions)
 	return mux
@@ -85,11 +103,47 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 }
 
 type chatRequest struct {
-	Stream   bool `json:"stream"`
-	Messages []struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
+	rawMessages json.RawMessage
+	rawTools    json.RawMessage
+	Model       string `json:"model"`
+	User        string `json:"user"`
+	Tools       []struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	} `json:"tools"`
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+	Stream     bool            `json:"stream"`
+	Messages   []struct {
+		ToolCallID string          `json:"tool_call_id,omitempty"`
+		Name       string          `json:"name,omitempty"`
+		ToolCalls  json.RawMessage `json:"tool_calls,omitempty"`
+		Role       string          `json:"role"`
+		Content    json.RawMessage `json:"content"`
 	} `json:"messages"`
+}
+
+func (r *chatRequest) UnmarshalJSON(raw []byte) error {
+	type plain chatRequest
+	var decoded plain
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	var fields struct {
+		Messages json.RawMessage `json:"messages"`
+		Tools    json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	*r = chatRequest(decoded)
+	r.rawMessages = fields.Messages
+	r.rawTools = fields.Tools
+	if len(r.rawMessages) == 0 {
+		r.rawMessages = json.RawMessage("[]")
+	}
+	return nil
 }
 
 // answersToolResult reports whether the request's newest message - past the
@@ -177,19 +231,25 @@ func (s *Server) Answer(prompt string) string {
 // under one lock, so two completions served at once get distinct ids. tool is
 // the matched rule's call, nil when the reply is text only.
 func (s *Server) pick(prompt string) (answer string, tool *ToolCall, call int) {
+	answer, tool, call, _ = s.pickNamed(prompt)
+	return
+}
+
+func (s *Server) pickNamed(prompt string) (answer string, tool *ToolCall, call int, rule string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
+	s.answerTurn++
 	lower := strings.ToLower(prompt)
-	for _, r := range s.Rules {
-		if r.Match == "" || strings.Contains(lower, strings.ToLower(r.Match)) {
-			return r.Answer, r.Tool, s.calls
+	for i, r := range s.Rules {
+		if !r.extended() && (r.Match == "" || strings.Contains(lower, strings.ToLower(r.Match))) {
+			return r.Answer, r.Tool, s.calls, fmt.Sprintf("rule-%d", i)
 		}
 	}
 	if len(s.Answers) > 0 {
-		return s.Answers[(s.calls-1)%len(s.Answers)], nil, s.calls
+		return s.Answers[(s.answerTurn-1)%len(s.Answers)], nil, s.calls, "answers"
 	}
-	return "You said: " + strings.TrimSpace(prompt), nil, s.calls
+	return "You said: " + strings.TrimSpace(prompt), nil, s.calls, "echo"
 }
 
 // Calls is how many completions the stub has answered.
@@ -200,12 +260,27 @@ func (s *Server) Calls() int {
 }
 
 func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
+	if secretClientHeader(s.ClientHeader) {
+		http.Error(w, `{"error":{"message":"client header must be a nonsecret test identifier"}}`, 400)
+		return
+	}
 	var req chatRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&req); err != nil {
 		http.Error(w, `{"error":{"message":"invalid JSON body"}}`, http.StatusBadRequest)
 		return
 	}
-	answer, tool, call := s.pick(req.lastUserText(s.StripTags))
+	if s.scripted(w, r, req) {
+		return
+	}
+	start := time.Now()
+	capture := &journalWriter{ResponseWriter: w, status: 200}
+	w = capture
+	answer, tool, call, rule := s.pickNamed(req.lastUserText(s.StripTags))
+	defer func() {
+		messages, tools := req.rawMessages, req.rawTools
+		entry := Entry{Rule: rule, Seq: call, At: start, Model: req.Model, Profile: r.Header.Get("X-Tgfake-Profile"), Client: s.clientKey(r, req), Messages: messages, Tools: tools, ToolChoice: req.ToolChoice, Status: capture.status, Response: capture.body.String(), LatencyMS: float64(time.Since(start)) / float64(time.Millisecond), Step: -1}
+		s.journal(entry)
+	}()
 	id := fmt.Sprintf("chatcmpl-tgfake-%d", call)
 	created := time.Now().Unix()
 	usage := map[string]any{"prompt_tokens": 1, "completion_tokens": len(strings.Fields(answer)), "total_tokens": 1 + len(strings.Fields(answer))}

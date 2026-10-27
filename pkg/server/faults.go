@@ -8,6 +8,19 @@ import (
 // Fault makes the fake answer a method with an error, the way Telegram does
 // on a bad request, a flood or an outage.
 type Fault struct {
+	// Target is "file" for authenticated downloads, otherwise the Bot API.
+	Target string `json:"target,omitempty"`
+	// ChatID is an exact scope; zero matches every chat.
+	ChatID int64 `json:"chat_id,omitempty"`
+	// Path is an exact relative download path (for example photo/file-1).
+	Path string `json:"path,omitempty"`
+	// DelayMS delays before applying an operation, unless AfterApply is set.
+	DelayMS int `json:"delay_ms,omitempty"`
+	// Disconnect aborts the HTTP connection without an HTTP response.
+	Disconnect bool `json:"disconnect,omitempty"`
+	// AfterApply executes the method before delaying or losing its response.
+	AfterApply bool `json:"after_apply,omitempty"`
+
 	// Method is the Bot API method name, or "*" for every method.
 	Method string `json:"method"`
 	// Code is the error_code and the HTTP status.
@@ -31,7 +44,7 @@ func (s *Server) SetFault(f Fault) {
 	if f.Method == "" {
 		f.Method = "*"
 	}
-	if f.Code == 0 {
+	if f.Code == 0 && f.DelayMS == 0 && !f.Disconnect {
 		f.Code = 500
 	}
 	if f.Description == "" {
@@ -39,7 +52,11 @@ func (s *Server) SetFault(f Fault) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.faults[f.Method] = &f
+	key := f.Method
+	if f.Target == "file" {
+		key = "file:*"
+	}
+	s.faults[key] = &f
 }
 
 // ClearFault removes the fault scheduled for method; "" or "*" removes the
@@ -94,6 +111,13 @@ func (s *Server) takeFaultLocked(method string, params url.Values) *Fault {
 
 // matches reports whether the fault's Contains filter lets it fire on a call.
 func (f *Fault) matches(params url.Values) bool {
+	id, _ := chatIDOf(params)
+	if f.ChatID != 0 && id != f.ChatID {
+		return false
+	}
+	if f.Path != "" && params.Get("path") != f.Path {
+		return false
+	}
 	if f.Contains == "" {
 		return true
 	}

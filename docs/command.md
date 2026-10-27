@@ -60,7 +60,8 @@ These flags configure the model described in [scripted-model.md](scripted-model.
 |------|---------|---------|
 | `--llm` | off | Also serve a scripted OpenAI-compatible model under `/v1`. |
 | `--llm-model` | `tgfake-demo` | The model id `/v1/models` lists and the answers carry. |
-| `--llm-script` | empty | A JSON file with a list of rules, `[{"match": "...", "answer": "..."}]`. A rule with `"tool": {"name": ..., "arguments": {...}}` calls that tool first and answers its result. A file that cannot be read or is not a JSON list of rules stops the command with exit status 1. |
+| `--llm-client-header` | empty | Header containing a nonsecret LLM client key instead of request `user`. Requires `--llm`. A name that looks like a credential ([scripted-model.md](scripted-model.md#journal-and-reset) lists them) stops the command with exit status 1. |
+| `--llm-script` | empty | A JSON file with a list of rules, `[{"match": "...", "answer": "..."}]`. A legacy rule with `"tool": {"name": ..., "arguments": {...}}` calls that tool first and answers its result. Named rules can instead define filters, sequential steps and provider faults; see [scripted-model.md](scripted-model.md#independent-named-sequences). A file that cannot be read or is not a JSON list of rules stops the command with exit status 1. |
 | `--llm-answer` | none | A canned answer, used in turn when no rule matches. Repeatable. |
 | `--llm-delay` | `50ms` | Pause before each streamed chunk. `0s` streams at once. |
 | `--llm-chunk-words` | `1` | Words per streamed chunk. |

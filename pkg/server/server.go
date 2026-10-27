@@ -74,12 +74,15 @@ const (
 
 // Call is one Bot API request the fake answered, kept in the outbox.
 type Call struct {
-	Seq      int               `json:"seq"`
-	At       time.Time         `json:"at"`
-	Method   string            `json:"method"`
-	Params   map[string]string `json:"params"`
-	Status   int               `json:"status"`
-	Response json.RawMessage   `json:"response"`
+	Fault        *Fault            `json:"fault,omitempty"`
+	Applied      bool              `json:"applied"`
+	ResponseSent bool              `json:"response_sent"`
+	Seq          int               `json:"seq"`
+	At           time.Time         `json:"at"`
+	Method       string            `json:"method"`
+	Params       map[string]string `json:"params"`
+	Status       int               `json:"status"`
+	Response     json.RawMessage   `json:"response"`
 }
 
 // storedFile is incoming or outgoing media retained by the stand.
@@ -285,6 +288,13 @@ func (s *Server) Calls(method string) []Call {
 	out := make([]Call, 0, len(s.calls))
 	for _, c := range s.calls {
 		if method == "" || strings.EqualFold(c.Method, method) {
+			c.Fault = copyPointer(c.Fault)
+			c.Response = append(json.RawMessage(nil), c.Response...)
+			params := make(map[string]string, len(c.Params))
+			for k, v := range c.Params {
+				params[k] = v
+			}
+			c.Params = params
 			out = append(out, c)
 		}
 	}
@@ -313,12 +323,14 @@ func (s *Server) recordLocked(method string, params url.Values, status int, body
 		flat[k] = params.Get(k)
 	}
 	s.calls = append(s.calls, Call{
-		Seq:      len(s.calls) + 1,
-		At:       s.now(),
-		Method:   method,
-		Params:   flat,
-		Status:   status,
-		Response: json.RawMessage(append([]byte(nil), body...)),
+		Applied:      status >= 200 && status < 300,
+		ResponseSent: true,
+		Seq:          len(s.calls) + 1,
+		At:           s.now(),
+		Method:       method,
+		Params:       flat,
+		Status:       status,
+		Response:     json.RawMessage(append([]byte(nil), body...)),
 	})
 	if s.opts.Logf != nil {
 		s.opts.Logf("%s %d %s", method, status, summarizeParams(flat))
