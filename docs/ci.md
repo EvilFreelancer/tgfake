@@ -52,7 +52,7 @@ With `start: "true"` the action runs `tgfake --addr <addr> <args>` in the backgr
 On `ubuntu-latest`, run a checked-out `tgcloud/` project directly with the action. Node.js executes inside the container; the workflow needs no host Node.js installation or separate bot process. Pin the action to a release containing serverless support:
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v5
 - uses: EvilFreelancer/tgfake@<release-containing-serverless>
   id: tgfake
   with:
@@ -113,7 +113,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Start tgfake
         id: tgfake
