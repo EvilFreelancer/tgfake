@@ -211,6 +211,15 @@ func TestRunRefusesModelFlagsWithoutLLM(t *testing.T) {
 	}
 }
 
+// A client header whose name looks like a credential would put its value in
+// the model's journal; the command refuses it at start, not at the first call.
+func TestRunRefusesACredentialClientHeader(t *testing.T) {
+	err := run(context.Background(), []string{"--addr", "127.0.0.1:0", "--llm", "--llm-client-header", "X_API_KEY"}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "--llm-client-header") {
+		t.Fatalf("a credential client header was accepted: %v", err)
+	}
+}
+
 // The flag parser stops at the first word that is not a flag, so anything
 // after one would be dropped unseen.
 func TestRunRefusesAPositionalArgument(t *testing.T) {

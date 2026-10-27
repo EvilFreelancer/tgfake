@@ -316,7 +316,8 @@ See [sim-api.md](sim-api.md#addressed-network-faults) for scope and precedence.
 `llmstub.Rule` embeds `Filters` and adds `Name`, `Steps []Step` and `RepeatLast`.
 `Step` configures text/tool responses, usage, tool-result matching and provider
 faults. `Server.ClientHeader` overrides request `user` with a nonsecret test
-header. Configure public fields before serving. `SetRules` safely copies and
+header; `llmstub.CheckClientHeader(name)` refuses a name that looks like a
+credential. Configure public fields before serving. `SetRules` safely copies and
 replaces a script, rejects implicit malformed responses and resets cursors.
 `Log()` returns an independent ordered `[]Entry` of the newest 1000 requests; `ClearLog()` preserves
 cursors/counters; `Reset()` clears log/cursors and rewinds legacy canned-answer

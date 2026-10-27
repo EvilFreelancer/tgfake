@@ -325,6 +325,17 @@ func (s *Server) scripted(w http.ResponseWriter, r *http.Request, req chatReques
 	return true
 }
 
+// CheckClientHeader refuses a Server.ClientHeader name that looks like it
+// carries a credential: the header's value is journalled as the client key
+// and served by GET /sim/llm/log. A completion is refused with 400 under such
+// a header anyway; this lets a caller refuse it before serving.
+func CheckClientHeader(name string) error {
+	if secretClientHeader(name) {
+		return fmt.Errorf("client header %q looks like a credential; name a nonsecret test identifier", name)
+	}
+	return nil
+}
+
 // secretClientHeader reports whether a header name looks like it carries a
 // credential, whatever separates its words.
 func secretClientHeader(name string) bool {

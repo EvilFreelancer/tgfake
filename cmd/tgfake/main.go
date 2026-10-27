@@ -114,6 +114,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	var stub *llmstub.Server
 	if *llm {
+		if err := llmstub.CheckClientHeader(*llmClientHeader); err != nil {
+			return fmt.Errorf("--llm-client-header: %w", err)
+		}
 		stub = &llmstub.Server{ClientHeader: *llmClientHeader, Model: *llmModel, Answers: llmAnswers, Delay: *llmDelay, ChunkWords: *llmChunk, StripTags: llmStripTags}
 		if *llmScript != "" {
 			rules, err := loadRules(*llmScript)
@@ -167,7 +170,18 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	defer stopPoll()
 	polled := make(chan error, 1)
 	if cloud != nil {
-		go func() { polled <- cloud.Poll(pollCtx) }()
+		go func() {
+			polled <- cloud.Poll(pollCtx)
+			close(polled)
+		}()
+	}
+	// waitPoll waits for the poller to stop. Its error after a shutdown is
+	// expected, and one that came first is already in pollErr; ranging to the
+	// close also returns when that one was taken, where a second receive
+	// would wait forever.
+	waitPoll := func() {
+		for range polled {
+		}
 	}
 	var pollErr error
 	select {
@@ -176,7 +190,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fake.Close()
 		if cloud != nil {
 			cloud.Close()
-			<-polled
+			waitPoll()
 		}
 		return err
 	case pollErr = <-polled:
@@ -185,9 +199,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	stopPoll()
 	if cloud != nil {
 		cloud.Close()
-		if pollErr == nil {
-			<-polled
-		}
+		waitPoll()
 	}
 	// Release the long polls first, then let the listener drain.
 	fake.Close()

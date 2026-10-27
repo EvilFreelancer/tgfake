@@ -279,8 +279,10 @@ journal. Test prompts and
 tool results themselves are visible. Credential header names are refused as client
 selectors: Authorization, Cookie, and names containing token, secret,
 password, credential, an API, access or private key, or the word `auth`,
-whichever of `-`, `_` or `.` separates their words. The completion is then
-answered `400`. Use nonsecret test identifiers.
+whichever of `-`, `_` or `.` separates their words. The command refuses such
+a `--llm-client-header` at start with exit status 1, a Go caller can check a
+name with `llmstub.CheckClientHeader`, and a completion under one is answered
+`400`. Use nonsecret test identifiers.
 Entries appear after completion; an in-flight request can finish after a
 journal clear. Reset or replace scripts between quiescent test runs.
 
