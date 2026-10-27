@@ -274,7 +274,7 @@ func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
 	answer, tool, call, rule := s.pickNamed(req.lastUserText(s.StripTags))
 	defer func() {
 		messages, tools := req.rawMessages, req.rawTools
-		entry := Entry{Rule: rule, Seq: call, At: start, Model: req.Model, Profile: r.Header.Get("X-Tgfake-Profile"), Client: req.User, Messages: messages, Tools: tools, ToolChoice: req.ToolChoice, Status: capture.status, Response: capture.body.String(), LatencyMS: float64(time.Since(start)) / float64(time.Millisecond), Step: -1}
+		entry := Entry{Rule: rule, Seq: call, At: start, Model: req.Model, Profile: r.Header.Get("X-Tgfake-Profile"), Client: s.clientKey(r, req), Messages: messages, Tools: tools, ToolChoice: req.ToolChoice, Status: capture.status, Response: capture.body.String(), LatencyMS: float64(time.Since(start)) / float64(time.Millisecond), Step: -1}
 		s.mu.Lock()
 		s.entries = append(s.entries, entry)
 		s.mu.Unlock()

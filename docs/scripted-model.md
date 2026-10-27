@@ -244,6 +244,8 @@ failure persistent; omit it and add a success step for a one-time failure.
 A delayed step watches the request context, so a client timeout cancels it
 without holding the scenario mutex. Its journal status is 499 with
 `cancelled: true` when cancellation is observed; 499 is diagnostic only.
+Cancellation consumes the step and clears its pending tool results because
+the client did not receive those tool calls. A retry can use the next step.
 
 Extended rules support non-streaming requests. A matching streamed request
 gets 409 without consuming a step. Legacy text/tool streaming remains
@@ -263,8 +265,10 @@ available. Partial SSE failures and deterministic stream faults are future work.
 In Go use `Log()`, `ClearLog()`, `SetRules(rules)` and `Reset()`. Each entry
 records `seq`, `at`, profile, client key, model, messages, full offered tools,
 `tool_choice`, selected rule and zero-based step, HTTP status, response bytes
-as a string and `latency_ms`. Legacy entries use step -1. Request headers,
-including Authorization, are not copied into the journal. Test prompts and
+as a string and `latency_ms`. Legacy entries use step -1. The configured
+nonsecret client key is recorded as `client` for both legacy and sequenced
+responses. Request headers, including Authorization, are not copied into the
+journal. Test prompts and
 tool results themselves are visible. Credential header names (Authorization,
 Cookie, and names containing token, secret or API-key variants) are refused
 as client selectors. Use nonsecret test identifiers.

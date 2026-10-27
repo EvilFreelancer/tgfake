@@ -37,7 +37,7 @@ purpose. No token, no phone, no network.
   `/v1/chat/completions` that answers by rule, in turn or by echo, streams
   word by word and can call tools, so an LLM bot runs with no key. Named
   sequences isolate clients, match model/system/tools, and script provider
-  errors with a request journal. The self-contained
+  errors and timeout recovery with a request journal. The self-contained
   [dialog bot example](examples/dialogbot) exercises a guarded tool dialog.
 - **Local Telegram Serverless.** `--serverless <project>` runs `tgcloud/`
   JavaScript handlers and authenticated Mini App endpoints in Docker, with

@@ -1,6 +1,7 @@
 package llmstub
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -181,6 +182,97 @@ func TestTimeoutDoesNotBlockOtherClients(t *testing.T) {
 	_, body, _ := scriptedPost(t, srv.URL, "", `{"user":"slow"}`)
 	if !strings.Contains(body, "recovered") {
 		t.Fatal(body)
+	}
+}
+
+func TestCancelledToolStepAllowsRecovery(t *testing.T) {
+	s := &Server{Rules: []Rule{{Name: "timeout", Steps: []Step{
+		{DelayMS: 1000, ToolCalls: []ToolCall{{Name: "lookup"}}},
+		{ToolCalls: []ToolCall{{Name: "lookup", ID: "recovery-call"}}},
+		{ToolName: "lookup", ToolResult: "ready", Answer: "recovered"},
+	}}}}
+	handler := s.Handler()
+	body := `{"user":"a","tools":[{"type":"function","function":{"name":"lookup"}}]}`
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)).WithContext(ctx)
+	out := httptest.NewRecorder()
+	handler.ServeHTTP(out, req)
+	if out.Body.Len() != 0 || len(s.Log()) != 1 || !s.Log()[0].Cancelled || s.Log()[0].Status != 499 {
+		t.Fatal(out.Body.String(), s.Log())
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)))
+		return out
+	}
+	out = post(body)
+	if out.Code != 200 || !strings.Contains(out.Body.String(), `"id":"recovery-call"`) {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	// A delivered recovery call must still require its own tool result.
+	if out = post(body); out.Code != 409 {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	out = post(`{"user":"a","messages":[{"role":"tool","tool_call_id":"recovery-call","content":"ready"}]}`)
+	if out.Code != 200 || !strings.Contains(out.Body.String(), "recovered") {
+		t.Fatal(out.Code, out.Body.String())
+	}
+}
+
+func TestLegacyClientHeaderJournal(t *testing.T) {
+	for _, mode := range []string{"rule", "answers", "echo", "stream"} {
+		t.Run(mode, func(t *testing.T) {
+			s := &Server{ClientHeader: "X-Test-Client"}
+			switch mode {
+			case "rule":
+				s.Rules = []Rule{{Answer: "matched"}}
+			case "answers":
+				s.Answers = []string{"answer"}
+			}
+			body := `{"user":"shared","messages":[{"role":"user","content":"hello"}]}`
+			if mode == "stream" {
+				body = `{"stream":true}`
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+			req.Header.Set("X-Test-Client", "client-a")
+			out := httptest.NewRecorder()
+			s.Handler().ServeHTTP(out, req)
+			log := s.Log()
+			if out.Code != 200 || len(log) != 1 || log[0].Client != "client-a" {
+				t.Fatal(out.Code, log)
+			}
+		})
+	}
+}
+
+func TestCancelledReservationPreservesNewerToolCalls(t *testing.T) {
+	s := &Server{Rules: []Rule{{Name: "overlap", Steps: []Step{
+		{ToolCalls: []ToolCall{{Name: "lookup", ID: "old-call"}}},
+		{ToolCalls: []ToolCall{{Name: "lookup", ID: "new-call"}}},
+		{Answer: "done"},
+	}}}}
+	var req chatRequest
+	if err := json.Unmarshal([]byte(`{"tools":[{"type":"function","function":{"name":"lookup"}}]}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	_, _, selected, problem, abandon := s.selectStep(req, "", "a")
+	if !selected || problem != "" || abandon == nil {
+		t.Fatal(selected, problem)
+	}
+	if err := json.Unmarshal([]byte(`{"tools":[{"type":"function","function":{"name":"lookup"}}],"messages":[{"role":"tool","tool_call_id":"old-call","content":"ready"}]}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	_, _, selected, problem, _ = s.selectStep(req, "", "a")
+	if !selected || problem != "" {
+		t.Fatal(selected, problem)
+	}
+	// A late cancellation must not erase another request's pending results.
+	abandon()
+	req.Messages = nil
+	_, _, _, problem, _ = s.selectStep(req, "", "a")
+	if problem != "missing tool result for new-call" {
+		t.Fatal(problem)
 	}
 }
 

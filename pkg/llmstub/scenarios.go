@@ -43,8 +43,9 @@ type scenarioKey struct {
 	profile, client string
 }
 type cursor struct {
-	index   int
-	pending map[string]string
+	index       int
+	pending     map[string]string
+	reservation int
 }
 
 // Entry is one completed LLM request, ordered by reservation sequence. No
@@ -106,7 +107,7 @@ func (r Rule) extended() bool {
 
 // selectStep reserves a response under the mutex. Waiting and writing happen
 // after unlocking, so a slow provider never blocks another client.
-func (s *Server) selectStep(req chatRequest, profile, client string) (step Step, entry Entry, selected bool, problem string) {
+func (s *Server) selectStep(req chatRequest, profile, client string) (step Step, entry Entry, selected bool, problem string, abandon func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prompt := strings.ToLower(req.lastUserText(s.StripTags))
@@ -115,7 +116,7 @@ func (s *Server) selectStep(req chatRequest, profile, client string) (step Step,
 			continue
 		}
 		if !rule.extended() {
-			return step, entry, false, ""
+			return step, entry, false, "", nil
 		}
 		s.calls++
 		entry = Entry{Seq: s.calls, Rule: rule.Name, Step: 0}
@@ -123,14 +124,14 @@ func (s *Server) selectStep(req chatRequest, profile, client string) (step Step,
 			entry.Rule = fmt.Sprintf("rule-%d", i)
 		}
 		if req.Stream {
-			return step, entry, true, "sequenced responses support non-streaming requests only"
+			return step, entry, true, "sequenced responses support non-streaming requests only", nil
 		}
 		if rule.Steps == nil {
 			step.Answer = rule.Answer
 			if rule.Tool != nil {
 				step.ToolCalls = []ToolCall{*rule.Tool}
 			}
-			return step, entry, true, validateTools(req, step)
+			return step, entry, true, validateTools(req, step), nil
 		}
 		if s.cursors == nil {
 			s.cursors = map[scenarioKey]*cursor{}
@@ -145,17 +146,17 @@ func (s *Server) selectStep(req chatRequest, profile, client string) (step Step,
 		entry.Step = index
 		if index >= len(rule.Steps) {
 			if !rule.RepeatLast || len(rule.Steps) == 0 {
-				return step, entry, true, "scenario exhausted"
+				return step, entry, true, "scenario exhausted", nil
 			}
 			index = len(rule.Steps) - 1
 		}
 		step = rule.Steps[index]
 		entry.Step = index
 		if problem = matchResults(req, c.pending, step); problem != "" {
-			return step, entry, true, problem
+			return step, entry, true, problem, nil
 		}
 		if problem = validateTools(req, step); problem != "" {
-			return step, entry, true, problem
+			return step, entry, true, problem, nil
 		}
 		pending := map[string]string{}
 		// Copy before assigning IDs: configuration belongs to every client.
@@ -166,15 +167,26 @@ func (s *Server) selectStep(req chatRequest, profile, client string) (step Step,
 				tool.ID = fmt.Sprintf("call_llmstub_%d_%d", s.calls, j)
 			}
 			if _, exists := pending[tool.ID]; exists && !step.Negative {
-				return step, entry, true, "duplicate tool_call_id"
+				return step, entry, true, "duplicate tool_call_id", nil
 			}
 			pending[tool.ID] = tool.Name
 		}
 		c.pending = pending
 		c.index++
-		return step, entry, true, ""
+		c.reservation = entry.Seq
+		seq := entry.Seq
+		abandon = func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			// Cancellation consumes the step, but a client cannot answer
+			// calls it never received. Leave newer reservations untouched.
+			if c.reservation == seq {
+				c.pending = nil
+			}
+		}
+		return step, entry, true, "", abandon
 	}
-	return step, entry, false, ""
+	return step, entry, false, "", nil
 }
 
 func validateTools(req chatRequest, step Step) string {
@@ -233,14 +245,18 @@ func matchResults(req chatRequest, pending map[string]string, step Step) string 
 	return ""
 }
 
+func (s *Server) clientKey(r *http.Request, req chatRequest) string {
+	if s.ClientHeader != "" {
+		return r.Header.Get(s.ClientHeader)
+	}
+	return req.User
+}
+
 func (s *Server) scripted(w http.ResponseWriter, r *http.Request, req chatRequest) bool {
 	start := time.Now()
 	profile := r.Header.Get("X-Tgfake-Profile")
-	client := req.User
-	if s.ClientHeader != "" {
-		client = r.Header.Get(s.ClientHeader)
-	}
-	step, entry, selected, problem := s.selectStep(req, profile, client)
+	client := s.clientKey(r, req)
+	step, entry, selected, problem, abandon := s.selectStep(req, profile, client)
 	if !selected {
 		return false
 	}
@@ -280,6 +296,9 @@ func (s *Server) scripted(w http.ResponseWriter, r *http.Request, req chatReques
 		select {
 		case <-timer.C:
 		case <-r.Context().Done():
+			if abandon != nil {
+				abandon()
+			}
 			status = 499
 			entry.Cancelled = true
 			body = nil
