@@ -22,11 +22,12 @@ The packages and the command import nothing outside the standard library. The on
 | [`pkg/server`](../pkg/server) | The server: the Bot API (`methods.go`), the update queue and long polling (`updates.go`), chats and their views (`chat.go`), faults (`faults.go`), menu buttons and Mini App launches (`webapp.go`), the simulation API (`sim.go`), the response envelope (`response.go`) and the `Server` itself (`server.go`). |
 | [`pkg/botapi`](../pkg/botapi) | The wire types of the Bot API objects. |
 | [`pkg/webapp`](../pkg/webapp) | Mini App launch data without state: signing, validation, theme parameters, the address rule. |
-| [`pkg/llmstub`](../pkg/llmstub) | The scripted OpenAI-compatible model. |
+| [`pkg/llmstub`](../pkg/llmstub) | The scripted OpenAI-compatible model: legacy rules, answers in turn and echo in `llmstub.go`, named sequences, provider failures and the request journal in `scenarios.go`. |
 | [`pkg/serverless`](../pkg/serverless) | Local tgcloud module execution in Docker, the embedded JavaScript SDK, SQLite, update polling and authenticated endpoints. |
 | [`internal/chatpage`](../internal/chatpage) | The chat page: one self-contained HTML file embedded into the binary, which reads everything from the simulation API, with the phone frames of Mini Apps and of the in-app browser. |
 | [`features/`](../features) | Gherkin specs of the happy paths, run by godog harnesses in the packages. |
 | [`examples/echobot`](../examples/echobot) | A standard-library bot and its in-process tests. |
+| [`examples/dialogbot`](../examples/dialogbot) | A self-contained dialog over HTTP: a reply menu, two scripted model roles, a tool call and ForceReply; `script.json` doubles as a `--llm-script`. |
 | [`examples/serverless`](../examples/serverless) | A tgcloud counter project with a handler, schema and Mini App endpoint. |
 | [`examples/shell/bot-e2e.sh`](../examples/shell/bot-e2e.sh) | An integration test for a bot in any language: the binary, a bot process and curl. |
 | [`examples/docker`](../examples/docker) | A Docker Compose example: the image and a Node.js webhook echo bot in separate containers ([docker.md](docker.md)). |
@@ -40,7 +41,7 @@ The packages and the command import nothing outside the standard library. The on
 | [`.github/workflows/release.yaml`](../.github/workflows/release.yaml) | Publishes a release when a `vX.Y.Z` tag is pushed. |
 | [`docs/`](.) | This reference. [`README.md`](../README.md) is the landing page and links every page. |
 
-Inside `pkg/server`, `media.go` owns media sends/edits and authenticated downloads, `incoming_media.go` incoming files, `relay.go` copies/forwards and static contact/location sends, `inline.go` inline and Mini App messages, `commands.go` the command lists per scope and language, `payments.go` invoices, pre-checkout queries and payment service messages, `information.go` configurable chat/member/profile information, and `webhook.go` the delivery worker. Network requests use `Options.HTTPClient` and are cancelled on `Close`.
+Inside `pkg/server`, `media.go` owns media sends/edits and authenticated downloads, `incoming_media.go` incoming files, `relay.go` copies/forwards and static contact/location sends, `inline.go` inline and Mini App messages, `commands.go` the command lists per scope and language, `payments.go` invoices, pre-checkout queries and payment service messages, `information.go` configurable chat/member/profile information, `reply_keyboard.go` reply keyboards, ForceReply and the press of a reply button, `network_faults.go` delayed, disconnected and after-apply faults and download faults, and `webhook.go` the delivery worker. Network requests use `Options.HTTPClient` and are cancelled on `Close`.
 
 The release asset names are spelled the same way in `.goreleaser.yaml`, `scripts/install.sh`, `action.yml` and [ci.md](ci.md): renaming them in one place means renaming them in all of them.
 
@@ -68,7 +69,6 @@ The happy path of a feature is a Gherkin scenario in `features/`, and a godog ha
 
 | Spec | Harness |
 |------|---------|
-| [`features/dialog_bot.feature`](../features/dialog_bot.feature) | [`examples/dialogbot/main_test.go`](../examples/dialogbot/main_test.go), a complete offline dialog over HTTP. |
 | [`features/command.feature`](../features/command.feature) | [`cmd/tgfake/bdd_command_test.go`](../cmd/tgfake/bdd_command_test.go), against `run` on a free port. |
 | [`features/update_lifecycle.feature`](../features/update_lifecycle.feature) | [`pkg/server/bdd_lifecycle_test.go`](../pkg/server/bdd_lifecycle_test.go), with the server's clock under the test's control. |
 | [`features/mini_app.feature`](../features/mini_app.feature) | [`pkg/server/bdd_mini_app_test.go`](../pkg/server/bdd_mini_app_test.go). |
@@ -78,8 +78,12 @@ The happy path of a feature is a Gherkin scenario in `features/`, and a godog ha
 | [`features/payments.feature`](../features/payments.feature) | [`pkg/server/bdd_payments_test.go`](../pkg/server/bdd_payments_test.go), from `sendInvoice` through the pre-checkout query to the payment service messages. |
 | [`features/serverless.feature`](../features/serverless.feature) | [`pkg/serverless/bdd_serverless_test.go`](../pkg/serverless/bdd_serverless_test.go), against the Docker runtime and counter example. |
 | [`features/in_app_browser.feature`](../features/in_app_browser.feature) | [`internal/chatpage/bdd_browser_test.go`](../internal/chatpage/bdd_browser_test.go), which runs the chat page in headless Chrome and reads the document it ends up with; a tap goes through a harness page of the same origin that frames the chat page, clicks in it and writes down what happened. |
+| [`features/reply_keyboard.feature`](../features/reply_keyboard.feature) | [`pkg/server/bdd_reply_keyboard_test.go`](../pkg/server/bdd_reply_keyboard_test.go), from a reply keyboard through presses, a one-time keyboard and ForceReply to its removal. |
+| [`features/transport_faults.feature`](../features/transport_faults.feature) | [`pkg/server/bdd_transport_faults_test.go`](../pkg/server/bdd_transport_faults_test.go), a fault scoped to one chat, a response lost after the method applied and a failed download. |
+| [`features/scripted_sequences.feature`](../features/scripted_sequences.feature) | [`pkg/llmstub/bdd_sequences_test.go`](../pkg/llmstub/bdd_sequences_test.go), two model roles with their own cursors, a tool call answered by its result and a provider failure retried. |
+| [`features/dialog_bot.feature`](../features/dialog_bot.feature) | [`examples/dialogbot/bdd_dialog_test.go`](../examples/dialogbot/bdd_dialog_test.go), the whole example dialog over HTTP. |
 
-Edge cases and refusals are ordinary unit tests next to the code: `pkg/server/*_test.go` for the Bot API, the update queue, media, drafts, commands, payments and the simulation API, `pkg/llmstub/llmstub_test.go`, `pkg/webapp/webapp_test.go` (including a known signing vector), `internal/chatpage/page_test.go`, which holds the page to having no outside asset, `internal/chatpage/browser_test.go` for the links, sizes and buttons of the in-app browser, and `cmd/tgfake/main_test.go`. `go test ./...` also runs the tests of `examples/echobot`, so the example stays a working bot.
+Edge cases and refusals are ordinary unit tests next to the code: `pkg/server/*_test.go` for the Bot API, the update queue, media, drafts, commands, payments and the simulation API, `pkg/llmstub/llmstub_test.go` and `scenarios_test.go`, `pkg/webapp/webapp_test.go` (including a known signing vector), `internal/chatpage/page_test.go`, which holds the page to having no outside asset, `internal/chatpage/browser_test.go` for the links, sizes and buttons of the in-app browser, and `cmd/tgfake/main_test.go`. `go test ./...` also runs the tests of `examples/echobot` and `examples/dialogbot`, so the examples keep working.
 
 A change starts with a failing scenario for a new behaviour, or a failing unit test for an edge case or a bug, and carries its documentation: a new Bot API method is a row of [bot-api.md](bot-api.md), a new route a section of [sim-api.md](sim-api.md), a new flag a row of [command.md](command.md).
 

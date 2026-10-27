@@ -14,7 +14,11 @@ func TestDialogFeature(t *testing.T) {
 		Name: "Artificial dialog bot",
 		ScenarioInitializer: func(sc *godog.ScenarioContext) {
 			sc.Given(`^a self-contained HTTP bot test without credentials$`, func() { transcript = "" })
-			sc.When(`^the person selects a mode and completes a guarded tool dialog$`, func() error { var err error; transcript, err = demo(); return err })
+			sc.When(`^the person selects a mode and completes a guarded tool dialog$`, func() error {
+				var err error
+				transcript, err = demo()
+				return err
+			})
 			sc.Then(`^the transcript contains the reply menu, clarification and a reply to the result$`, func() error {
 				for _, text := range []string{"[Photo]", "[Video]", "[Wallet]", "Video", "Which style?", "Image ready.", "Brighter"} {
 					if !strings.Contains(transcript, text) {
