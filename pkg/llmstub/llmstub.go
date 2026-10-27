@@ -67,6 +67,7 @@ type Server struct {
 	ClientHeader string
 	cursors      map[scenarioKey]*cursor
 	entries      []Entry
+	dropped      int
 	answerTurn   int
 	mu           sync.Mutex
 	calls        int
@@ -275,9 +276,7 @@ func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		messages, tools := req.rawMessages, req.rawTools
 		entry := Entry{Rule: rule, Seq: call, At: start, Model: req.Model, Profile: r.Header.Get("X-Tgfake-Profile"), Client: s.clientKey(r, req), Messages: messages, Tools: tools, ToolChoice: req.ToolChoice, Status: capture.status, Response: capture.body.String(), LatencyMS: float64(time.Since(start)) / float64(time.Millisecond), Step: -1}
-		s.mu.Lock()
-		s.entries = append(s.entries, entry)
-		s.mu.Unlock()
+		s.journal(entry)
 	}()
 	id := fmt.Sprintf("chatcmpl-tgfake-%d", call)
 	created := time.Now().Unix()

@@ -183,16 +183,18 @@ func (s *Server) selectStep(req chatRequest, profile, client string) (step Step,
 		if step.fails() {
 			return step, entry, true, "", nil
 		}
+		previous := c.pending
 		c.pending = pending
 		c.reservation = entry.Seq
 		seq := entry.Seq
 		abandon = func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			// Cancellation consumes the step, but a client cannot answer
-			// calls it never received. Leave newer reservations untouched.
+			// Cancellation consumes the step, but the client never received
+			// it: the calls it made are not outstanding, the ones it had
+			// answered still are. Leave newer reservations untouched.
 			if c.reservation == seq {
-				c.pending = nil
+				c.pending = previous
 			}
 		}
 		return step, entry, true, "", abandon
@@ -297,9 +299,7 @@ func (s *Server) scripted(w http.ResponseWriter, r *http.Request, req chatReques
 		entry.Status = status
 		entry.Response = string(body)
 		entry.LatencyMS = float64(time.Since(start)) / float64(time.Millisecond)
-		s.mu.Lock()
-		s.entries = append(s.entries, entry)
-		s.mu.Unlock()
+		s.journal(entry)
 	}()
 	if problem == "" && step.DelayMS > 0 {
 		timer := time.NewTimer(time.Duration(step.DelayMS) * time.Millisecond)
@@ -316,19 +316,26 @@ func (s *Server) scripted(w http.ResponseWriter, r *http.Request, req chatReques
 			return true
 		}
 	}
+	w.Header().Set("Content-Type", "application/json")
 	for key, value := range step.Headers {
 		w.Header().Set(key, value)
 	}
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
 	return true
 }
 
+// secretClientHeader reports whether a header name looks like it carries a
+// credential, whatever separates its words.
 func secretClientHeader(name string) bool {
-	name = strings.ToLower(name)
-	for _, secret := range []string{"authorization", "cookie", "token", "secret", "api-key", "apikey"} {
+	name = strings.NewReplacer("_", "-", ".", "-").Replace(strings.ToLower(name))
+	for _, secret := range []string{"authorization", "cookie", "token", "secret", "password", "credential", "api-key", "apikey", "access-key", "private-key"} {
 		if strings.Contains(name, secret) {
+			return true
+		}
+	}
+	for _, word := range strings.Split(name, "-") {
+		if word == "auth" {
 			return true
 		}
 	}
@@ -385,11 +392,29 @@ func (s *Server) stepBody(step Step, req chatRequest, seq int) []byte {
 	return raw
 }
 
-// Log returns an independent snapshot in request order, including failures.
-func (s *Server) Log() []Entry {
+// journalLimit is how many completed requests the journal keeps; older ones
+// are dropped, so a long-running stand does not grow without bound.
+const journalLimit = 1000
+
+// journal files a completed request, dropping the oldest past journalLimit.
+func (s *Server) journal(entry Entry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	raw, _ := json.Marshal(s.entries)
+	s.entries = append(s.entries, entry)
+	if extra := len(s.entries) - journalLimit; extra > 0 {
+		s.entries = append([]Entry(nil), s.entries[extra:]...)
+		s.dropped += extra
+	}
+}
+
+// Log returns an independent snapshot in request order, including failures.
+// It holds the newest 1000 entries; GET /sim/llm/log counts the dropped ones.
+func (s *Server) Log() []Entry {
+	s.mu.Lock()
+	entries := append([]Entry(nil), s.entries...)
+	s.mu.Unlock()
+	// Stored entries are never changed, so the deep copy needs no lock.
+	raw, _ := json.Marshal(entries)
 	out := []Entry{}
 	_ = json.Unmarshal(raw, &out)
 	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
@@ -397,7 +422,7 @@ func (s *Server) Log() []Entry {
 }
 
 // ClearLog forgets completed requests, without rewinding sequence numbers.
-func (s *Server) ClearLog() { s.mu.Lock(); defer s.mu.Unlock(); s.entries = nil }
+func (s *Server) ClearLog() { s.mu.Lock(); defer s.mu.Unlock(); s.entries, s.dropped = nil, 0 }
 
 // Reset rewinds scenario cursors, legacy answer rotation and the journal.
 // Request sequence numbers keep growing. Reset after in-flight calls finish.
@@ -405,7 +430,7 @@ func (s *Server) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cursors = nil
-	s.entries = nil
+	s.entries, s.dropped = nil, 0
 	s.answerTurn = 0
 }
 
@@ -491,22 +516,33 @@ func cloneTool(tool ToolCall) ToolCall {
 func (s *Server) registerDiagnostics(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sim/llm/log", func(w http.ResponseWriter, _ *http.Request) {
 		entries := s.Log()
-		writeJSON(w, map[string]any{"entries": entries, "count": len(entries), "calls": s.Calls()})
+		s.mu.Lock()
+		dropped := s.dropped
+		s.mu.Unlock()
+		writeJSON(w, map[string]any{"entries": entries, "count": len(entries), "dropped": dropped, "calls": s.Calls()})
 	})
 	mux.HandleFunc("DELETE /sim/llm/log", func(w http.ResponseWriter, _ *http.Request) { s.ClearLog(); writeJSON(w, map[string]any{"ok": true}) })
 	mux.HandleFunc("POST /sim/llm/reset", func(w http.ResponseWriter, _ *http.Request) { s.Reset(); writeJSON(w, map[string]any{"ok": true}) })
 	mux.HandleFunc("PUT /sim/llm/script", func(w http.ResponseWriter, r *http.Request) {
 		var rules []Rule
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&rules); err != nil {
-			http.Error(w, "invalid script", 400)
+			refuse(w, "invalid script")
 			return
 		}
 		if err := s.SetRules(rules); err != nil {
-			http.Error(w, err.Error(), 400)
+			refuse(w, err.Error())
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
+}
+
+// refuse answers a /sim/llm/ request 400 with {"error": message}, the shape
+// of every refusal of the simulation API.
+func refuse(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 // journalWriter captures legacy JSON/SSE responses while preserving flushing.

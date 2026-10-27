@@ -318,7 +318,7 @@ See [sim-api.md](sim-api.md#addressed-network-faults) for scope and precedence.
 faults. `Server.ClientHeader` overrides request `user` with a nonsecret test
 header. Configure public fields before serving. `SetRules` safely copies and
 replaces a script, rejects implicit malformed responses and resets cursors.
-`Log()` returns an independent ordered `[]Entry`; `ClearLog()` preserves
+`Log()` returns an independent ordered `[]Entry` of the newest 1000 requests; `ClearLog()` preserves
 cursors/counters; `Reset()` clears log/cursors and rewinds legacy canned-answer
 rotation while keeping completion IDs increasing. `Calls()` includes scripted
 failures. `Answer(prompt)` remains the legacy prompt-only API; structured

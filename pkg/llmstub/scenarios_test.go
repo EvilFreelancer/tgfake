@@ -464,3 +464,91 @@ func TestCancelledProviderFailureKeepsOutstandingToolCalls(t *testing.T) {
 		t.Fatal(out.Code, out.Body.String())
 	}
 }
+
+// A cancelled step was never delivered, so the client retries with the tool
+// results it already sent; the calls they answer are still outstanding.
+func TestCancelledAnswerKeepsTheResultsItWasGiven(t *testing.T) {
+	s := &Server{Rules: []Rule{{Name: "agent", Steps: []Step{
+		{ToolCalls: []ToolCall{{Name: "lookup", ID: "call-1"}}},
+		{DelayMS: 1000, ToolName: "lookup", Answer: "slow"},
+		{ToolName: "lookup", ToolResult: "ready", Answer: "recovered"},
+	}}}}
+	handler := s.Handler()
+	tools := `"tools":[{"type":"function","function":{"name":"lookup"}}]`
+	out := httptest.NewRecorder()
+	handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"user":"a",`+tools+`}`)))
+	result := `{"user":"a",` + tools + `,"messages":[{"role":"tool","tool_call_id":"call-1","content":"ready"}]}`
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	out = httptest.NewRecorder()
+	handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(result)).WithContext(ctx))
+	out = httptest.NewRecorder()
+	handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(result)))
+	if out.Code != 200 || !strings.Contains(out.Body.String(), "recovered") {
+		t.Fatal(out.Code, out.Body.String())
+	}
+}
+
+// The journal keeps the newest journalLimit entries and counts the rest.
+func TestJournalKeepsTheNewestEntries(t *testing.T) {
+	s := &Server{}
+	handler := s.Handler()
+	for i := 0; i < journalLimit+5; i++ {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`)))
+	}
+	log := s.Log()
+	if len(log) != journalLimit || log[0].Seq != 6 {
+		t.Fatalf("%d entries, first seq %d", len(log), log[0].Seq)
+	}
+	out := httptest.NewRecorder()
+	handler.ServeHTTP(out, httptest.NewRequest(http.MethodGet, "/sim/llm/log", nil))
+	var body struct{ Count, Dropped int }
+	if err := json.Unmarshal(out.Body.Bytes(), &body); err != nil || body.Count != journalLimit || body.Dropped != 5 {
+		t.Fatal(err, out.Body.String()[:80])
+	}
+	s.ClearLog()
+	out = httptest.NewRecorder()
+	handler.ServeHTTP(out, httptest.NewRequest(http.MethodGet, "/sim/llm/log", nil))
+	if !strings.Contains(out.Body.String(), `"dropped":0`) {
+		t.Fatal(out.Body.String())
+	}
+}
+
+func TestScriptedContentTypeIsKept(t *testing.T) {
+	page := "<html>Bad Gateway</html>"
+	s := &Server{Rules: []Rule{{Name: "proxy", Steps: []Step{{Status: 502, Negative: true, RawBody: &page, Headers: map[string]string{"Content-Type": "text/html"}}}}}}
+	out := httptest.NewRecorder()
+	s.Handler().ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`)))
+	if out.Code != 502 || out.Header().Get("Content-Type") != "text/html" || out.Body.String() != page {
+		t.Fatal(out.Code, out.Header(), out.Body.String())
+	}
+}
+
+func TestCredentialHeaderSpellingsAreRefused(t *testing.T) {
+	for _, name := range []string{"X_API_KEY", "X-Api_Key", "X.Access.Key", "X-Password", "X-Auth", "X-Client-Credential"} {
+		s := &Server{ClientHeader: name}
+		out := httptest.NewRecorder()
+		s.Handler().ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`)))
+		if out.Code != 400 {
+			t.Errorf("%s: %d", name, out.Code)
+		}
+	}
+	s := &Server{ClientHeader: "X-Author-Session"}
+	out := httptest.NewRecorder()
+	s.Handler().ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`)))
+	if out.Code != 200 {
+		t.Errorf("X-Author-Session: %d", out.Code)
+	}
+}
+
+func TestScriptRouteRefusesInJSON(t *testing.T) {
+	s := &Server{}
+	for _, body := range []string{`{`, `[{"steps":[{"raw_body":"x"}]}]`} {
+		out := httptest.NewRecorder()
+		s.Handler().ServeHTTP(out, httptest.NewRequest(http.MethodPut, "/sim/llm/script", strings.NewReader(body)))
+		var refusal struct{ Error string }
+		if out.Code != 400 || out.Header().Get("Content-Type") != "application/json" || json.Unmarshal(out.Body.Bytes(), &refusal) != nil || refusal.Error == "" {
+			t.Errorf("%s: %d %v %q", body, out.Code, out.Header(), out.Body.String())
+		}
+	}
+}

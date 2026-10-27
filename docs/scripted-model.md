@@ -79,7 +79,7 @@ The prompt is the text of the newest `user` message that has any text, trimmed (
 2. **Answers in turn.** With no rule matching, the canned answers of `--llm-answer` are used in turn: the n-th completion call gets the answer at position `(n - 1) mod <number of answers>`, counting from 0, so they repeat from the first once used up.
 3. **Echo.** With neither, the answer is `You said: <prompt>`.
 
-The count n behind the answers in turn is the number of completion calls the model has answered, legacy calls included: a call a legacy rule answered, a tool call and a call made by the client for its own purposes all move it on. Started with `--llm-script rules.json --llm-answer first --llm-answer second`, where the rules match `ping`, four prompts in a row are answered like this:
+The count n behind the answers in turn is the number of completion calls answered on this legacy path since the last reset: a call a legacy rule answered, a tool call and a call made by the client for its own purposes all move it on, while a call a named sequence answers does not. Started with `--llm-script rules.json --llm-answer first --llm-answer second`, where the rules match `ping`, four prompts in a row are answered like this:
 
 | Call | Prompt | Answer |
 |------|--------|--------|
@@ -198,7 +198,9 @@ concurrent reconfiguration. Reserve test headers for nonsecret identifiers.
 A matched request reserves one step under a mutex, then releases the mutex
 before waiting or writing. A guard call never advances the agent sequence.
 There is no implicit cycling: exhaustion returns HTTP 409 with an `error`
-object. `repeat_last: true` explicitly repeats the final step. Failed request
+object. `repeat_last: true` explicitly repeats the final step, with its
+`tool_name` or `tool_result` requirement, so a repeated final step that reads
+a tool result needs a tool call before every repetition. Failed request
 validation (409) does not consume a step; a reserved timeout or HTTP failure
 does, allowing the next request to recover. Legacy canned-answer rotation is
 independent of these new sequences; legacy-only scripts keep their behavior.
@@ -244,12 +246,13 @@ failure persistent; omit it and add a success step for a one-time failure.
 A delayed step watches the request context, so a client timeout cancels it
 without holding the scenario mutex. Its journal status is 499 with
 `cancelled: true` when cancellation is observed; 499 is diagnostic only.
-Cancellation consumes the step and clears its pending tool results because
-the client did not receive those tool calls. A retry can use the next step.
-A failing step (a `status` of 400 or above, `raw_body` or `empty_choices`),
-cancelled or not, delivers no completion, so it leaves the outstanding tool
-calls in place: the retry carries the same tool results and the next step,
-for example one with `tool_name`, still checks them.
+Cancellation consumes the step, but the client never received it: tool
+calls the step made are not outstanding, and the calls the cancelled request
+answered still are, so a retry with the same tool results can use the next
+step. A failing step (a `status` of 400 or above, `raw_body` or
+`empty_choices`), cancelled or not, delivers no completion either and leaves
+the outstanding tool calls in place: the retry carries the same tool results
+and the next step, for example one with `tool_name`, still checks them.
 
 Extended rules support non-streaming requests. A matching streamed request
 gets 409 without consuming a step. Legacy text/tool streaming remains
@@ -261,9 +264,9 @@ available. Partial SSE failures and deterministic stream faults are future work.
 
 | Route | Effect |
 |-------|--------|
-| `GET /sim/llm/log` | `{entries, count, calls}`; completed entries in request reservation order, total completion counter in `calls`. |
+| `GET /sim/llm/log` | `{entries, count, dropped, calls}`; the newest 1000 completed entries in request reservation order, the number of older entries dropped since the last clear or reset in `dropped`, total completion counter in `calls`. |
 | `DELETE /sim/llm/log` | Clear completed entries without rewinding counters or cursors. |
-| `PUT /sim/llm/script` | Replace the JSON rule array, validate explicit negative steps and reset cursors. Preserve journal and counters. |
+| `PUT /sim/llm/script` | Replace the JSON rule array, validate explicit negative steps and reset cursors. Preserve journal and counters. A body that is not a rule array, or a script that fails validation, is answered `400` with `{"error": "..."}`. |
 | `POST /sim/llm/reset` | Clear journal, rewind scenario cursors and legacy answer rotation. Keep completion IDs and counters increasing. |
 
 In Go use `Log()`, `ClearLog()`, `SetRules(rules)` and `Reset()`. Each entry
@@ -273,9 +276,11 @@ as a string and `latency_ms`. Legacy entries use step -1. The configured
 nonsecret client key is recorded as `client` for both legacy and sequenced
 responses. Request headers, including Authorization, are not copied into the
 journal. Test prompts and
-tool results themselves are visible. Credential header names (Authorization,
-Cookie, and names containing token, secret or API-key variants) are refused
-as client selectors. Use nonsecret test identifiers.
+tool results themselves are visible. Credential header names are refused as client
+selectors: Authorization, Cookie, and names containing token, secret,
+password, credential, an API, access or private key, or the word `auth`,
+whichever of `-`, `_` or `.` separates their words. The completion is then
+answered `400`. Use nonsecret test identifiers.
 Entries appear after completion; an in-flight request can finish after a
 journal clear. Reset or replace scripts between quiescent test runs.
 
