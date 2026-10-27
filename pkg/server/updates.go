@@ -118,9 +118,6 @@ func (s *Server) injectMessageLocked(in IncomingMessage) (updateID, messageID in
 			msg.ReplyToMessage = target.quoted()
 		}
 	}
-	if chat.replyKeyboard != nil && chat.replyKeyboard.OneTimeKeyboard {
-		chat.keyboardHidden = true
-	}
 	if chat.forceReply != nil && in.ReplyToMessageID == chat.forceReply.MessageID {
 		chat.forceReply = nil
 	}

@@ -72,3 +72,39 @@ func TestReplyKeyboardHTTP(t *testing.T) {
 		t.Fatal("invalid press created a message")
 	}
 }
+
+func TestKeyboardPressUsesKeyboardAndForceReply(t *testing.T) {
+	s := newStand(t, Options{})
+	send := func(markup string) {
+		t.Helper()
+		status, body := s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {markup}})
+		if status != 200 {
+			t.Fatalf("send: %d %v", status, body)
+		}
+	}
+	send(`{"keyboard":[[{"text":"Photo"}]],"one_time_keyboard":true}`)
+	s.sim(http.MethodPost, "/sim/message", map[string]any{"text": "typed"})
+	if s.fake.Chat(4242).KeyboardHidden {
+		t.Fatal("one-time keyboard hid without being used")
+	}
+	send(`{"force_reply":true}`)
+	forceID := s.fake.Chat(4242).ForceReply.MessageID
+	status, body := s.sim(http.MethodPost, "/sim/keyboard/press", map[string]any{"row": 0, "column": 0})
+	if status != 200 {
+		t.Fatalf("press: %d %v", status, body)
+	}
+	chat := s.fake.Chat(4242)
+	if !chat.KeyboardHidden {
+		t.Fatal("one-time keyboard did not hide after its button was pressed")
+	}
+	if chat.ForceReply != nil {
+		t.Fatal("button press did not clear ForceReply")
+	}
+	_, updates := s.call("getUpdates", nil)
+	entries := updates["result"].([]any)
+	pressed := entries[len(entries)-1].(map[string]any)["message"].(map[string]any)
+	reply, ok := pressed["reply_to_message"].(map[string]any)
+	if !ok || reply["message_id"] != float64(forceID) {
+		t.Fatalf("button press is not a reply to ForceReply message %d: %v", forceID, pressed)
+	}
+}

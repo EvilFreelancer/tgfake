@@ -79,6 +79,12 @@ func (s *Server) PressKeyboard(in KeyboardPress) (updateID, messageID int, err e
 		return 0, 0, fmt.Errorf("reply button row %d column %d does not exist", in.Row, in.Column)
 	}
 	message.Text = rows[in.Row][in.Column].Text
+	if c.forceReply != nil {
+		message.ReplyToMessageID = c.forceReply.MessageID
+	}
+	if c.replyKeyboard.OneTimeKeyboard {
+		c.keyboardHidden = true
+	}
 	updateID, messageID = s.injectMessageLocked(message)
 	return updateID, messageID, nil
 }

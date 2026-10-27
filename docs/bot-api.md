@@ -301,13 +301,15 @@ that menu installed. `ReplyKeyboardRemove` removes it immediately; an old
 button then fails simulation with 404 and no update. Inline callbacks retain
 their separate meaning.
 
-`one_time_keyboard` hides the menu after an incoming text message, preserving
-its buttons. The chat page's "Reply keyboard" button reopens it. The Go and
-simulation press APIs can press a hidden menu. Resize/persistence flags are
-retained as presentation hints; the page uses its own compact button layout.
-`ForceReply` stores its message ID and placeholder independently of the menu.
-The browser addresses the next typed response to that message; the resulting
-update has `reply_to_message`. A matching reply clears the outstanding request.
+`one_time_keyboard` hides the menu only after one of its buttons is pressed,
+not after an unrelated typed message, and preserves its buttons. The chat
+page's "Reply keyboard" button reopens it. The Go and simulation press APIs
+can press a hidden menu. Resize/persistence flags are retained as presentation
+hints; the page uses its own compact button layout. `ForceReply` stores its
+message ID and placeholder independently of the menu. The browser addresses
+the next typed response to that message, and a keyboard press does the same;
+the resulting update has `reply_to_message`. A matching reply clears the
+outstanding request.
 These controls are exposed in `ChatView`, not added to Telegram's returned
 `Message.reply_markup`, whose public Go type remains the inline keyboard.
 

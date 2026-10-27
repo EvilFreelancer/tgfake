@@ -549,14 +549,16 @@ curl -s -X POST "$O/sim/keyboard/press" \
   -d '{"chat_id":4242,"user_id":77,"username":"bob","row":0,"column":1}'
 ```
 
-The response is `{update_id, message_id}`. A hidden one-time menu is still
-active and can be pressed again; a removed menu cannot. `/sim/callback` is
-exclusively for inline keyboards. `ChatView` exposes `reply_keyboard`,
-`keyboard_hidden` and `force_reply` (markup plus `message_id`). Message views
-retain their own `reply_keyboard`, `remove_keyboard` and `force_reply` for
-inspection. Ordinary typed responses use `/sim/message` with
-`reply_to_message_id`; ForceReply does not automatically rewrite API inputs.
-The browser chooses that ID for the next typed response.
+The response is `{update_id, message_id}`. A press hides a one-time menu and,
+when ForceReply is outstanding, sends the button text as a reply to its
+message and clears that request. A hidden one-time menu is still active and
+can be pressed again; a removed menu cannot. `/sim/callback` is exclusively
+for inline keyboards. `ChatView` exposes `reply_keyboard`, `keyboard_hidden`
+and `force_reply` (markup plus `message_id`). Message views retain their own
+`reply_keyboard`, `remove_keyboard` and `force_reply` for inspection. Ordinary
+typed responses use `/sim/message` with `reply_to_message_id`; ForceReply does
+not automatically rewrite API inputs. The browser chooses that ID for the next
+typed response.
 
 Only text buttons are simulated. Special KeyboardButton actions are ignored;
 use text-only keyboards in tests. `selective` is preserved but the current
