@@ -26,28 +26,47 @@ func cloneReplyKeyboard(k *botapi.ReplyKeyboardMarkup) *botapi.ReplyKeyboardMark
 	return &out
 }
 
-// applyReplyMarkupLocked is called only after a successful outgoing send.
+// applyReplyMarkupLocked keeps the reply-keyboard side of a sent message's
+// reply_markup, read the way the Bot API server reads it: a button is an
+// object with its text or the text alone, and a markup is one kind only - a
+// keyboard with rows, else an inline keyboard (none of these controls), else
+// remove_keyboard (or its old name hide_keyboard), else force_reply. It is
+// called only after a successful outgoing send.
 func (c *chatState) applyReplyMarkupLocked(raw string, stored *storedMessage) {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal([]byte(raw), &fields) != nil {
+	var markup struct {
+		botapi.ReplyKeyboardMarkup
+		Keyboard       [][]json.RawMessage `json:"keyboard"`
+		InlineKeyboard []json.RawMessage   `json:"inline_keyboard"`
+		RemoveKeyboard bool                `json:"remove_keyboard"`
+		HideKeyboard   bool                `json:"hide_keyboard"`
+		ForceReply     bool                `json:"force_reply"`
+	}
+	if json.Unmarshal([]byte(raw), &markup) != nil {
 		return
 	}
-	if _, ok := fields["keyboard"]; ok {
-		var k botapi.ReplyKeyboardMarkup
-		if json.Unmarshal([]byte(raw), &k) == nil {
-			c.replyKeyboard = &k
-			c.keyboardHidden = false
-			stored.replyKeyboard = cloneReplyKeyboard(&k)
+	keyboard := markup.ReplyKeyboardMarkup
+	for _, row := range markup.Keyboard {
+		buttons := make([]botapi.KeyboardButton, 0, len(row))
+		for _, b := range row {
+			var button botapi.KeyboardButton
+			if json.Unmarshal(b, &button.Text) != nil && json.Unmarshal(b, &button) != nil {
+				return
+			}
+			buttons = append(buttons, button)
 		}
+		keyboard.Keyboard = append(keyboard.Keyboard, buttons)
 	}
-	var remove botapi.ReplyKeyboardRemove
-	if json.Unmarshal([]byte(raw), &remove) == nil && remove.RemoveKeyboard {
-		c.replyKeyboard = nil
-		c.keyboardHidden = false
-		stored.removeKeyboard = &remove
-	}
-	var force botapi.ForceReply
-	if json.Unmarshal([]byte(raw), &force) == nil && force.ForceReply {
+	switch {
+	case len(keyboard.Keyboard) > 0:
+		c.replyKeyboard, c.keyboardHidden = &keyboard, false
+		stored.replyKeyboard = cloneReplyKeyboard(&keyboard)
+	case len(markup.InlineKeyboard) > 0:
+		// An inline keyboard leaves the reply keyboard and ForceReply alone.
+	case markup.RemoveKeyboard || markup.HideKeyboard:
+		c.replyKeyboard, c.keyboardHidden = nil, false
+		stored.removeKeyboard = &botapi.ReplyKeyboardRemove{RemoveKeyboard: true, Selective: keyboard.Selective}
+	case markup.ForceReply:
+		force := botapi.ForceReply{ForceReply: true, InputFieldPlaceholder: keyboard.InputFieldPlaceholder, Selective: keyboard.Selective}
 		c.forceReply = &ForceReplyView{ForceReply: force, MessageID: stored.msg.MessageID}
 		stored.forceReply = copyPointer(c.forceReply)
 	}

@@ -108,3 +108,37 @@ func TestKeyboardPressUsesKeyboardAndForceReply(t *testing.T) {
 		t.Fatalf("button press is not a reply to ForceReply message %d: %v", forceID, pressed)
 	}
 }
+
+// reply_markup is read the way the Bot API server reads it: a reply button may
+// be just its text, and a markup is one kind only - a keyboard with rows, else
+// an inline keyboard, else remove_keyboard (or hide_keyboard), else force_reply.
+func TestReplyMarkupReadsLikeTheBotAPIServer(t *testing.T) {
+	s := newStand(t, Options{})
+	send := func(markup string) {
+		t.Helper()
+		if status, body := s.call("sendMessage", url.Values{"chat_id": {"4242"}, "text": {"menu"}, "reply_markup": {markup}}); status != 200 {
+			t.Fatalf("send %s: %d %v", markup, status, body)
+		}
+	}
+	send(`{"keyboard":[["Yes",{"text":"No"}]],"one_time_keyboard":true}`)
+	v := s.fake.Chat(4242)
+	if v.ReplyKeyboard == nil || len(v.ReplyKeyboard.Keyboard) != 1 || v.ReplyKeyboard.Keyboard[0][0].Text != "Yes" || v.ReplyKeyboard.Keyboard[0][1].Text != "No" || !v.ReplyKeyboard.OneTimeKeyboard {
+		t.Fatalf("string buttons: %+v", v.ReplyKeyboard)
+	}
+	send(`{"keyboard":[["Again"]],"remove_keyboard":true}`)
+	if v = s.fake.Chat(4242); v.ReplyKeyboard == nil || v.ReplyKeyboard.Keyboard[0][0].Text != "Again" {
+		t.Fatalf("a keyboard with rows wins over remove_keyboard: %+v", v.ReplyKeyboard)
+	}
+	send(`{"inline_keyboard":[[{"text":"Go","callback_data":"go"}]],"force_reply":true}`)
+	if v = s.fake.Chat(4242); v.ForceReply != nil {
+		t.Fatalf("an inline keyboard wins over force_reply: %+v", v.ForceReply)
+	}
+	send(`{"keyboard":[],"force_reply":true}`)
+	if v = s.fake.Chat(4242); v.ForceReply == nil || v.ReplyKeyboard.Keyboard[0][0].Text != "Again" {
+		t.Fatalf("an empty keyboard is no keyboard: %+v %+v", v.ReplyKeyboard, v.ForceReply)
+	}
+	send(`{"hide_keyboard":true}`)
+	if v = s.fake.Chat(4242); v.ReplyKeyboard != nil {
+		t.Fatalf("hide_keyboard keeps the keyboard: %+v", v.ReplyKeyboard)
+	}
+}

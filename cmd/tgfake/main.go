@@ -222,11 +222,13 @@ func newMux(fake *server.Server, stub *llmstub.Server) http.Handler {
 	if stub == nil {
 		return fake.Handler()
 	}
+	model, telegram := stub.Handler(), fake.Handler()
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", stub.Handler())
-	mux.Handle("/sim/llm/", stub.Handler())
-	mux.HandleFunc("POST /sim/reset", func(w http.ResponseWriter, r *http.Request) { stub.Reset(); fake.Handler().ServeHTTP(w, r) })
-	mux.Handle("/", fake.Handler())
+	mux.Handle("/v1/", model)
+	mux.Handle("/sim/llm/", model)
+	// One reset for the stand: the model's cursors and journal, then the fake.
+	mux.HandleFunc("POST /sim/reset", func(w http.ResponseWriter, r *http.Request) { stub.Reset(); telegram.ServeHTTP(w, r) })
+	mux.Handle("/", telegram)
 	return mux
 }
 

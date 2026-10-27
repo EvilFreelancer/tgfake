@@ -301,6 +301,14 @@ that menu installed. `ReplyKeyboardRemove` removes it immediately; an old
 button then fails simulation with 404 and no update. Inline callbacks retain
 their separate meaning.
 
+`reply_markup` is read the way the Bot API server reads it. A reply button is
+an object with `text` or the text alone as a string (`{"keyboard":[["Yes","No"]]}`).
+A markup is one kind only, in this order: a `keyboard` with at least one row,
+else an `inline_keyboard`, else `remove_keyboard` (or its old name
+`hide_keyboard`), else `force_reply`. So `{"keyboard":[["A"]],"remove_keyboard":true}`
+installs the keyboard, and an inline keyboard with `"force_reply":true` asks
+for no reply.
+
 `one_time_keyboard` hides the menu only after one of its buttons is pressed,
 not after an unrelated typed message, and preserves its buttons. The chat
 page's "Reply keyboard" button reopens it. The Go and simulation press APIs
