@@ -76,6 +76,12 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 	if problem == "" {
 		problem = invoiceKeyboardProblem(markup)
 	}
+	// An invoice takes no reply keyboard, removal or ForceReply: the markup
+	// is then not an inline keyboard with a Pay button, and api.telegram.org
+	// answers so.
+	if keyboard, remove, force := replyControls(params.Get("reply_markup")); problem == "" && (keyboard != nil || remove != nil || force != nil) {
+		problem = "Bad Request: REPLY_MARKUP_BUY_EMPTY"
+	}
 	if problem != "" {
 		s.writeError(w, method, params, 400, problem, 0)
 		return
@@ -108,7 +114,6 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 		HasProtectedContent: truthy(params.Get("protect_content")),
 	}
 	stored := chat.appendLocked(msg, true, "", false)
-	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	stored.invoicePayload = params.Get("payload")
 	result := stored.clone()
 	s.mu.Unlock()

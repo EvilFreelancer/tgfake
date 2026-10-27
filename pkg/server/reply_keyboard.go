@@ -27,14 +27,14 @@ func cloneReplyKeyboard(k *botapi.ReplyKeyboardMarkup) *botapi.ReplyKeyboardMark
 	return &out
 }
 
-// applyReplyMarkupLocked keeps the reply-keyboard side of a sent message's
-// reply_markup, read the way the Bot API server reads it (get_reply_markup):
-// a markup is one kind only - a keyboard with rows, else an inline keyboard
-// (none of these controls), else remove_keyboard (or its old name
-// hide_keyboard), else force_reply. A keyboard whose buttons all lack text is
-// no markup at all, as in TDLib. parseKeyboard has refused a keyboard that
-// cannot be read; this is called only after a successful outgoing send.
-func (c *chatState) applyReplyMarkupLocked(raw string, stored *storedMessage) {
+// replyControls reads the reply-keyboard side of reply_markup the way the
+// Bot API server reads it (get_reply_markup): a markup is one kind only - a
+// keyboard with rows, else an inline keyboard (none of these controls), else
+// remove_keyboard (or its old name hide_keyboard), else force_reply. A
+// keyboard whose buttons all lack text is no markup at all, as in TDLib. At
+// most one result is set; parseKeyboard has refused a keyboard that cannot be
+// read.
+func replyControls(raw string) (keyboard *botapi.ReplyKeyboardMarkup, remove *botapi.ReplyKeyboardRemove, force *botapi.ForceReply) {
 	var markup struct {
 		botapi.ReplyKeyboardMarkup
 		Keyboard       json.RawMessage   `json:"keyboard"`
@@ -44,30 +44,44 @@ func (c *chatState) applyReplyMarkupLocked(raw string, stored *storedMessage) {
 		ForceReply     bool              `json:"force_reply"`
 	}
 	if json.Unmarshal([]byte(raw), &markup) != nil {
-		return
+		return nil, nil, nil
 	}
-	keyboard := markup.ReplyKeyboardMarkup
+	read := markup.ReplyKeyboardMarkup
 	rows := 0
 	if markup.Keyboard != nil {
 		var problem string
-		if keyboard.Keyboard, rows, problem = keyboardRows(markup.Keyboard); problem != "" {
-			return
+		if read.Keyboard, rows, problem = keyboardRows(markup.Keyboard); problem != "" {
+			return nil, nil, nil
 		}
 	}
 	switch {
 	case rows > 0:
-		if len(keyboard.Keyboard) > 0 {
-			c.replyKeyboard, c.keyboardHidden = &keyboard, false
-			stored.replyKeyboard = cloneReplyKeyboard(&keyboard)
+		if len(read.Keyboard) > 0 {
+			return &read, nil, nil
 		}
 	case len(markup.InlineKeyboard) > 0:
-		// An inline keyboard leaves the reply keyboard and ForceReply alone.
 	case markup.RemoveKeyboard || markup.HideKeyboard:
-		c.replyKeyboard, c.keyboardHidden = nil, false
-		stored.removeKeyboard = &botapi.ReplyKeyboardRemove{RemoveKeyboard: true, Selective: keyboard.Selective}
+		return nil, &botapi.ReplyKeyboardRemove{RemoveKeyboard: true, Selective: read.Selective}, nil
 	case markup.ForceReply:
-		force := botapi.ForceReply{ForceReply: true, InputFieldPlaceholder: keyboard.InputFieldPlaceholder, Selective: keyboard.Selective}
-		c.forceReply = &ForceReplyView{ForceReply: force, MessageID: stored.msg.MessageID}
+		return nil, nil, &botapi.ForceReply{ForceReply: true, InputFieldPlaceholder: read.InputFieldPlaceholder, Selective: read.Selective}
+	}
+	return nil, nil, nil
+}
+
+// applyReplyMarkupLocked keeps the reply controls of a sent message's
+// reply_markup on the chat and the message. It is called only after a
+// successful outgoing send.
+func (c *chatState) applyReplyMarkupLocked(raw string, stored *storedMessage) {
+	keyboard, remove, force := replyControls(raw)
+	switch {
+	case keyboard != nil:
+		c.replyKeyboard, c.keyboardHidden = keyboard, false
+		stored.replyKeyboard = cloneReplyKeyboard(keyboard)
+	case remove != nil:
+		c.replyKeyboard, c.keyboardHidden = nil, false
+		stored.removeKeyboard = remove
+	case force != nil:
+		c.forceReply = &ForceReplyView{ForceReply: *force, MessageID: stored.msg.MessageID}
 		stored.forceReply = copyPointer(c.forceReply)
 	}
 }
