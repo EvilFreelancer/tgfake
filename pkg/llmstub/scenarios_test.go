@@ -594,3 +594,19 @@ func TestScriptRouteRefusesNull(t *testing.T) {
 		t.Fatal(out.Code, out.Body.String(), s.Rules)
 	}
 }
+
+// A named sequence serves non-streaming requests only: a streamed request it
+// matches is refused with 409, and the refusal does not consume a step.
+func TestStreamedNamedScenarioIsRefusedWithoutConsumingAStep(t *testing.T) {
+	s := &Server{Rules: []Rule{{Name: "seq", Steps: []Step{{Answer: "one"}, {Answer: "two"}}}}}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	status, body, _ := scriptedPost(t, srv.URL, "", `{"stream":true}`)
+	if status != 409 || !strings.Contains(body, "non-streaming") {
+		t.Fatal(status, body)
+	}
+	_, body, _ = scriptedPost(t, srv.URL, "", `{}`)
+	if !strings.Contains(body, "one") {
+		t.Fatal("the refused stream consumed a step:", body)
+	}
+}
