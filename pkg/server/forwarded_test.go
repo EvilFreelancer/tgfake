@@ -27,3 +27,20 @@ func TestIncomingForwardOriginAndEntities(t *testing.T) {
 		}
 	}
 }
+
+func TestChatViewExposesTextEntities(t *testing.T) {
+	s := newStand(t, Options{})
+	entities := []botapi.MessageEntity{
+		{Type: "bold", Offset: 0, Length: 4},
+		{Type: "text_link", Offset: 5, Length: 4, URL: "https://example.test"},
+	}
+	s.fake.InjectMessage(IncomingMessage{Text: "bold link", Entities: entities})
+
+	view := s.fake.Chat(4242)
+	if len(view.Messages) != 1 || len(view.Messages[0].Entities) != 2 {
+		t.Fatalf("chat entities = %#v", view.Messages)
+	}
+	if got := view.Messages[0].Entities[1]; got.Type != "text_link" || got.URL != "https://example.test" {
+		t.Fatalf("text link = %#v", got)
+	}
+}

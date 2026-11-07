@@ -31,6 +31,7 @@ type MessageEntity struct {
 	Offset        int    `json:"offset"`
 	Length        int    `json:"length"`
 	URL           string `json:"url,omitempty"`
+	Language      string `json:"language,omitempty"`
 	User          *User  `json:"user,omitempty"`
 	CustomEmojiID string `json:"custom_emoji_id,omitempty"`
 }
