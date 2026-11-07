@@ -245,6 +245,23 @@ func TestProtectedTextCannotBeForwarded(t *testing.T) {
 	}
 }
 
+func TestProtectedUserSourcesCannotBeForwardedOrCopied(t *testing.T) {
+	s := newStand(t, Options{})
+	s.fake.InjectMessage(IncomingMessage{Text: "private", HasProtectedContent: true})
+	for _, tc := range []struct {
+		method      string
+		description string
+	}{
+		{"forwardMessage", "Bad Request: message can't be forwarded"},
+		{"copyMessage", "Bad Request: message can't be copied"},
+	} {
+		status, body := s.call(tc.method, url.Values{"chat_id": {"2"}, "from_chat_id": {"4242"}, "message_id": {"1"}})
+		if status != http.StatusBadRequest || body["description"] != tc.description {
+			t.Fatalf("%s protected source: %d %v", tc.method, status, body)
+		}
+	}
+}
+
 func TestInlineRequiredFieldsAreCheckedBeforeAnswering(t *testing.T) {
 	s := newStand(t, Options{InlineMode: true})
 	_, id, _ := s.fake.InjectInlineQuery(IncomingInlineQuery{Query: "hello"})

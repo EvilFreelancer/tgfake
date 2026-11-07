@@ -43,6 +43,15 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.token = token
 		s.mu.Unlock()
 	}
+	if chatID, ok := chatIDOf(params); ok {
+		s.mu.Lock()
+		migrateTo := s.migrations[chatID]
+		s.mu.Unlock()
+		if migrateTo != 0 {
+			s.writeMigrateError(w, method, params, migrateTo)
+			return
+		}
+	}
 	var handled bool
 	w, handled = s.beginFault(w, r, method, params, s.takeFault(method, params))
 	if handled {
@@ -87,6 +96,10 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.answerInline(w, r, method, params)
 	case "getchat", "getchatmember", "getchatmembercount", "getchatadministrators", "getuserprofilephotos":
 		s.chatInformation(w, method, params)
+	case "restrictchatmember", "banchatmember", "unbanchatmember", "promotechatmember", "setchatpermissions", "setchatadministratorcustomtitle":
+		s.moderateChat(w, method, params)
+	case "approvechatjoinrequest", "declinechatjoinrequest":
+		s.answerChatJoinRequest(w, method, params)
 	case "editmessagetext", "editmessagereplymarkup":
 		s.editMessage(w, method, params)
 	case "deletemessage":
@@ -537,6 +550,11 @@ func (s *Server) writeError(w http.ResponseWriter, method string, params url.Val
 	}
 	body, _ := json.Marshal(resp)
 	s.respond(w, method, params, code, body)
+}
+
+func (s *Server) writeMigrateError(w http.ResponseWriter, method string, params url.Values, migrateTo int64) {
+	body, _ := json.Marshal(apiResponse{OK: false, ErrorCode: http.StatusBadRequest, Description: "Bad Request: group chat was upgraded to a supergroup chat", Parameters: &responseParams{MigrateToChatID: migrateTo}})
+	s.respond(w, method, params, http.StatusBadRequest, body)
 }
 
 func (s *Server) respond(w http.ResponseWriter, method string, params url.Values, status int, body []byte) {

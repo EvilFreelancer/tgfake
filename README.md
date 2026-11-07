@@ -151,6 +151,18 @@ fmt.Print(fake.Chat(4242).Text()) // [1] alice: hello / [2] bot: ...
 [`examples/echobot`](examples/echobot) is a bot written with the standard
 library and its tests; [docs/go.md](docs/go.md) covers the whole Go API.
 
+**Moderation and lifecycle tests.** The Bot API surface includes
+`restrictChatMember`, `banChatMember`, `unbanChatMember`,
+`promoteChatMember`, `setChatPermissions`,
+`setChatAdministratorCustomTitle`, `approveChatJoinRequest` and
+`declineChatJoinRequest`. The simulation side adds `POST /sim/member`,
+`/sim/join-request`, `/sim/message/edit`, `/sim/reaction` and
+`/sim/chat/migrate`; `GET /sim/clock`, `POST /sim/clock/advance` and
+`POST /sim/clock/set` make dates and expiry deterministic. `/sim/message`
+also accepts sender chats, forward origins, arbitrary entities, stickers and
+forum-topic fields. See [the Bot API](docs/bot-api.md) and
+[simulation API](docs/sim-api.md) references for payloads and enforcement.
+
 **CI.** The action installs a release on Linux, macOS and Windows runners and
 can start it in the background; [docs/ci.md](docs/ci.md) has workflows for
 GitHub Actions and the install script for everything else.

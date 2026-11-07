@@ -58,6 +58,9 @@ type Options struct {
 	// AllowHTTPWebhook permits non-loopback HTTP webhook URLs on any port
 	// for container test networks. False preserves Telegram's URL checks.
 	AllowHTTPWebhook bool
+	// Now supplies the server clock. Nil uses time.Now. Tests may provide a
+	// deterministic clock and advance it through the simulation API.
+	Now func() time.Time
 }
 
 // The bot a Server with no options plays.
@@ -125,6 +128,9 @@ type Server struct {
 	files           map[string]*storedFile
 	nextFileID      int
 	now             func() time.Time
+	clockMu         sync.Mutex
+	clockBase       func() time.Time
+	clockOffset     time.Duration
 
 	// token is the one in the path of the latest Bot API call: what launch
 	// data is signed with when Options.Token is not set.
@@ -137,6 +143,8 @@ type Server struct {
 	inlineMessages map[string]*storedMessage
 	prepared       map[string]preparedMessage
 	profiles       map[int64]botapi.UserProfilePhotos
+	joinRequests   map[int64]map[int64]*botapi.ChatJoinRequest
+	migrations     map[int64]int64
 	nextInline     int
 	nextAlbum      int
 	webhook        webhookState
@@ -162,6 +170,10 @@ func New(opts Options) *Server {
 	if opts.HTTPClient == nil {
 		opts.HTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
+	clockBase := opts.Now
+	if clockBase == nil {
+		clockBase = time.Now
+	}
 	s := &Server{
 		opts:           opts,
 		nextUpdate:     1,
@@ -173,7 +185,7 @@ func New(opts Options) *Server {
 		cbqChat:        map[string]int64{},
 		preCheckouts:   map[string]*preCheckout{},
 		files:          map[string]*storedFile{},
-		now:            time.Now,
+		clockBase:      clockBase,
 		chatMenus:      map[int64]*botapi.MenuButton{},
 		webQueries:     map[string]webQuery{},
 		inlineQueries:  map[string]*inlineQueryState{},
@@ -181,6 +193,13 @@ func New(opts Options) *Server {
 		prepared:       map[string]preparedMessage{},
 		webhookDone:    make(chan struct{}),
 		profiles:       map[int64]botapi.UserProfilePhotos{},
+		joinRequests:   map[int64]map[int64]*botapi.ChatJoinRequest{},
+		migrations:     map[int64]int64{},
+	}
+	s.now = func() time.Time {
+		s.clockMu.Lock()
+		defer s.clockMu.Unlock()
+		return s.clockBase().Add(s.clockOffset)
 	}
 	s.networkCtx, s.stopNetwork = context.WithCancel(context.Background())
 	go s.deliverWebhooks()
@@ -244,6 +263,8 @@ func (s *Server) Reset() {
 	s.inlineMessages = map[string]*storedMessage{}
 	s.prepared = map[string]preparedMessage{}
 	s.profiles = map[int64]botapi.UserProfilePhotos{}
+	s.joinRequests = map[int64]map[int64]*botapi.ChatJoinRequest{}
+	s.migrations = map[int64]int64{}
 	s.wakeLocked()
 }
 

@@ -23,11 +23,16 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | Method and path | What it does |
 |-----------------|--------------|
 | `POST /sim/message` | The person sends a text message. |
+| `POST /sim/message/edit` | Edit an existing incoming message and inject `edited_message`. |
+| `POST /sim/reaction` | Inject a `message_reaction` update. |
 | `POST /sim/media` | The person sends a file, photo, video or audio message. |
 | `POST /sim/inline` | Inject an inline query (requires `--inline`). |
 | `GET /sim/inline` | Read queries and the bot's offered results. |
 | `POST /sim/inline/choose` | Select an offered result and queue `chosen_inline_result`. |
 | `POST /sim/chat/configure` | Configure chat metadata and members. |
+| `POST /sim/chat/migrate` | Upgrade a group to a new supergroup and emit both migration service messages. |
+| `POST /sim/member` | Inject a member or bot join, leave, or promotion lifecycle event. |
+| `POST /sim/join-request` | Inject a `chat_join_request` for approval or decline by the bot. |
 | `POST /sim/user/profile` | Configure a user's profile photos. |
 | `POST /sim/callback` | The person taps an inline keyboard button. |
 | `POST /sim/draft/stop` | The person presses Stop under a streamed draft. |
@@ -39,6 +44,9 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | `GET /sim/file/{id}` | The bytes of any stored incoming or outgoing media. |
 | `GET /sim/chats` | The chats the stand knows. |
 | `GET /sim/state` | The bot, the update queue, the subscription, the commands, the menu button and the faults. |
+| `GET /sim/clock` | Read the server clock. |
+| `POST /sim/clock/advance` | Move the server clock by a signed number of seconds. |
+| `POST /sim/clock/set` | Set the server clock to a Unix timestamp. |
 | `POST /sim/webapp/launch` | The person opens a Mini App. |
 | `POST /sim/webapp/data` | Deliver a Mini App's `web_app_data` service message. |
 | `POST /sim/webapp/share` | Share a prepared inline message for its designated user. |
@@ -66,8 +74,16 @@ The person types a message. It is stored in the chat and becomes the next `messa
 | `chat_title` | string | `Fake group` for a group | The title of a group chat, set when the chat has none yet. |
 | `reply_to_message_id` | integer | none | Makes the message a reply to a message of the chat. An id that is not in the chat is ignored. |
 | `mention` | boolean | `false` | Puts the bot's `@username` and a space in front of the text, with a `mention` entity: how a group message addresses the bot. |
+| `sender_chat` | Chat | none | The group itself for an anonymous administrator, or a linked channel for an automatic post. |
+| `is_automatic_forward` | boolean | `false` | Marks a linked-channel post. |
+| `forward_origin` | MessageOrigin | none | A forwarded user, hidden user, chat, or channel origin. |
+| `entities` | MessageEntity[] | none | Arbitrary incoming entities such as `url`, `text_link`, `mention`, and `custom_emoji`; generated command/mention entities are appended. |
+| `sticker` | Sticker | none | Sends a minimal incoming sticker message; `text` may then be empty. |
+| `message_thread_id`, `is_topic_message` | integer, boolean | none, `false` | Marks a message as belonging to a forum topic. |
 
 A text that starts with a command, such as `/start` or `/help@tgfake_bot`, carries a `bot_command` entity at offset 0, which is what makes it a command for every Bot API library.
+
+In a configured group, a sender whose member status is `left` or `kicked`, or a restricted member without `can_send_messages`, is refused with HTTP 403 and a simulation `error`. An expired temporary restriction is cleared before this check.
 
 The answer is the id of the update and the id of the message in its chat:
 
@@ -127,6 +143,33 @@ Configuration replaces metadata and membership, preserves the transcript and cre
 ```bash
 curl -s -X POST $O/sim/chat/configure -d '{"chat":{"id":-100,"type":"supergroup","title":"Test","username":"test_group"},"members":[{"status":"creator","is_anonymous":false,"user":{"id":4242,"is_bot":false,"first_name":"Alice"}}]}'
 ```
+
+## Membership and lifecycle injection
+
+`POST /sim/member` accepts `chat_id`, `action` (`join`, `leave` or
+`promote`), a Bot API `user`, and optional `invite_link` and administrator
+`rights`. Join and leave append the corresponding service message and queue a
+`chat_member` update; a transition of the configured bot queues
+`my_chat_member`. Promotion changes the member record without a service
+message. Bot moderation methods queue the same membership update when the
+active `allowed_updates` subscription includes it.
+
+`POST /sim/join-request` accepts `chat_id`, `user`, optional `bio` and
+`invite_link`, stores the pending request and queues `chat_join_request`.
+`approveChatJoinRequest` consumes it, adds the member and queues
+`chat_member`; decline only consumes it. A missing request is refused with
+`Bad Request: HIDE_REQUESTER_MISSING`.
+
+`POST /sim/message/edit` accepts `chat_id`, `message_id`, replacement `text`
+and optional `entities`, updates the transcript and queues `edited_message`.
+`POST /sim/reaction` accepts `chat_id`, `message_id`, `user` or `actor_chat`,
+and `old_reaction`/`new_reaction` arrays, then queues `message_reaction`.
+
+`POST /sim/chat/migrate` accepts `chat_id` of a basic group and an unused
+`new_chat_id`. It creates the supergroup, copies members and metadata, and
+queues the old `migrate_to_chat_id` and new `migrate_from_chat_id` service
+messages. Later Bot API calls naming the old group receive Telegram's upgrade
+error and `parameters.migrate_to_chat_id`.
 
 ## POST /sim/user/profile
 
@@ -472,9 +515,17 @@ Starts a new session without restarting the command. It answers `{"ok":true}` an
 
 Update ids keep growing: a bot that is polling remembers the last id it confirmed and would drop anything numbered below it. The `allowed_updates` subscription, configured webhook and signing token stay. Inline/prepared id counters also keep growing to avoid collisions with retained client ids. A Serverless project's database is not reset.
 
+The simulation clock also stays unchanged across reset.
+
 ```bash
 curl -s -X POST $O/sim/reset
 ```
+
+## Simulation clock
+
+`GET /sim/clock` returns `{"unix":1760000000,"time":"2025-10-09T08:53:20Z"}`. `POST /sim/clock/advance` accepts `{"seconds":3600}` (negative values move it backwards), and `POST /sim/clock/set` accepts `{"unix":1760000000}`. Message and call dates, temporary moderation expiry, drafts, typing, prepared messages, webhooks and Mini App signing use this clock. Long-poll and network-delay waits remain real durations, so advancing time never blocks an HTTP request.
+
+In-process tests can set `Options.Now` to provide a deterministic base clock. With no option, the clock follows real time; advance/set apply an offset to it.
 
 ## Recipes
 
