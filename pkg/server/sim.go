@@ -111,7 +111,7 @@ func (s *Server) simMessage(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if strings.TrimSpace(in.Text) == "" {
+	if strings.TrimSpace(in.Text) == "" && in.Sticker == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "text is empty"})
 		return
 	}

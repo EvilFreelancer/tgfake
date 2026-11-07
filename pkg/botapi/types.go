@@ -134,6 +134,17 @@ type VideoNote struct {
 	FileSize     int    `json:"file_size,omitempty"`
 }
 
+type Sticker struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	Type         string `json:"type"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	IsAnimated   bool   `json:"is_animated"`
+	IsVideo      bool   `json:"is_video"`
+	Emoji        string `json:"emoji,omitempty"`
+}
+
 // Location is a point on the map.
 type Location struct {
 	Latitude  float64 `json:"latitude"`
@@ -290,6 +301,7 @@ type Message struct {
 	Audio               *Audio                `json:"audio,omitempty"`
 	Voice               *Audio                `json:"voice,omitempty"`
 	VideoNote           *VideoNote            `json:"video_note,omitempty"`
+	Sticker             *Sticker              `json:"sticker,omitempty"`
 	Location            *Location             `json:"location,omitempty"`
 	Contact             *Contact              `json:"contact,omitempty"`
 	Venue               *Venue                `json:"venue,omitempty"`

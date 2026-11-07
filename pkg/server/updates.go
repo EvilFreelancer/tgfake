@@ -30,6 +30,7 @@ type IncomingMessage struct {
 	IsAutomaticForward bool                   `json:"is_automatic_forward,omitempty"`
 	ForwardOrigin      *botapi.MessageOrigin  `json:"forward_origin,omitempty"`
 	Entities           []botapi.MessageEntity `json:"entities,omitempty"`
+	Sticker            *botapi.Sticker        `json:"sticker,omitempty"`
 }
 
 // IncomingCallback is a tap on an inline keyboard button. The button is
@@ -153,6 +154,7 @@ func (s *Server) injectMessageLocked(in IncomingMessage) (updateID, messageID in
 		SenderChat:         in.SenderChat,
 		IsAutomaticForward: in.IsAutomaticForward,
 		ForwardOrigin:      in.ForwardOrigin,
+		Sticker:            in.Sticker,
 	}
 	if in.ReplyToMessageID != 0 {
 		if target := chat.byID[in.ReplyToMessageID]; target != nil {

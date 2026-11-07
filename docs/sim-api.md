@@ -77,6 +77,7 @@ The person types a message. It is stored in the chat and becomes the next `messa
 | `is_automatic_forward` | boolean | `false` | Marks a linked-channel post. |
 | `forward_origin` | MessageOrigin | none | A forwarded user, hidden user, chat, or channel origin. |
 | `entities` | MessageEntity[] | none | Arbitrary incoming entities such as `url`, `text_link`, `mention`, and `custom_emoji`; generated command/mention entities are appended. |
+| `sticker` | Sticker | none | Sends a minimal incoming sticker message; `text` may then be empty. |
 
 A text that starts with a command, such as `/start` or `/help@tgfake_bot`, carries a `bot_command` entity at offset 0, which is what makes it a command for every Bot API library.
 
