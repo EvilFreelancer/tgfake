@@ -327,6 +327,8 @@ func updateKind(u botapi.Update) string {
 		return "my_chat_member"
 	case u.ChatMember != nil:
 		return "chat_member"
+	case u.ChatJoinRequest != nil:
+		return "chat_join_request"
 	default:
 		return "message"
 	}

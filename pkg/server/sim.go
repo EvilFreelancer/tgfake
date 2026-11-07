@@ -63,6 +63,7 @@ func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sim/media", s.simMedia)
 	mux.HandleFunc("POST /sim/user/profile", s.simUserProfile)
 	mux.HandleFunc("POST /sim/member", s.simMemberLifecycle)
+	mux.HandleFunc("POST /sim/join-request", s.simJoinRequest)
 }
 
 func (s *Server) simClock(w http.ResponseWriter, _ *http.Request) {

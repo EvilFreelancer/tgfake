@@ -99,6 +99,7 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `promoteChatMember` | `chat_id`, `user_id`, administrator `can_*` fields | `true`; stores an administrator, or demotes when every right is false. |
 | `setChatPermissions` | `chat_id`, `permissions`, `use_independent_chat_permissions` | `true`; replaces the default permissions returned by `getChat`. |
 | `setChatAdministratorCustomTitle` | `chat_id`, `user_id`, `custom_title` | `true`; changes the administrator member record. |
+| `approveChatJoinRequest`, `declineChatJoinRequest` | `chat_id`, `user_id` | `true`; consumes a pending simulated request. Approval adds the member. |
 | `getUserProfilePhotos` | `user_id`, `offset`, `limit` | Configured profile photos; a known user has an empty list by default. |
 
 Messages, updates, keyboards and the other objects have the shapes of the types in [`pkg/botapi`](../pkg/botapi/types.go).

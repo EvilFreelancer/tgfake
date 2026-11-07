@@ -313,6 +313,15 @@ type ChatMemberUpdated struct {
 	InviteLink    map[string]any `json:"invite_link,omitempty"`
 }
 
+type ChatJoinRequest struct {
+	Chat       Chat           `json:"chat"`
+	From       User           `json:"from"`
+	UserChatID int64          `json:"user_chat_id"`
+	Date       int64          `json:"date"`
+	Bio        string         `json:"bio,omitempty"`
+	InviteLink map[string]any `json:"invite_link,omitempty"`
+}
+
 // CallbackQuery is what a tap on an inline button delivers.
 type CallbackQuery struct {
 	ID           string   `json:"id"`
@@ -344,6 +353,7 @@ type Update struct {
 	ChosenInlineResult       *ChosenInlineResult       `json:"chosen_inline_result,omitempty"`
 	ChatMember               *ChatMemberUpdated        `json:"chat_member,omitempty"`
 	MyChatMember             *ChatMemberUpdated        `json:"my_chat_member,omitempty"`
+	ChatJoinRequest          *ChatJoinRequest          `json:"chat_join_request,omitempty"`
 }
 
 // BotCommand is one entry of setMyCommands.

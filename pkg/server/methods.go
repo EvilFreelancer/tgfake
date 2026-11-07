@@ -89,6 +89,8 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.chatInformation(w, method, params)
 	case "restrictchatmember", "banchatmember", "unbanchatmember", "promotechatmember", "setchatpermissions", "setchatadministratorcustomtitle":
 		s.moderateChat(w, method, params)
+	case "approvechatjoinrequest", "declinechatjoinrequest":
+		s.answerChatJoinRequest(w, method, params)
 	case "editmessagetext", "editmessagereplymarkup":
 		s.editMessage(w, method, params)
 	case "deletemessage":

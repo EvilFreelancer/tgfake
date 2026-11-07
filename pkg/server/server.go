@@ -143,6 +143,7 @@ type Server struct {
 	inlineMessages map[string]*storedMessage
 	prepared       map[string]preparedMessage
 	profiles       map[int64]botapi.UserProfilePhotos
+	joinRequests   map[int64]map[int64]*botapi.ChatJoinRequest
 	nextInline     int
 	nextAlbum      int
 	webhook        webhookState
@@ -191,6 +192,7 @@ func New(opts Options) *Server {
 		prepared:       map[string]preparedMessage{},
 		webhookDone:    make(chan struct{}),
 		profiles:       map[int64]botapi.UserProfilePhotos{},
+		joinRequests:   map[int64]map[int64]*botapi.ChatJoinRequest{},
 	}
 	s.now = func() time.Time {
 		s.clockMu.Lock()
@@ -259,6 +261,7 @@ func (s *Server) Reset() {
 	s.inlineMessages = map[string]*storedMessage{}
 	s.prepared = map[string]preparedMessage{}
 	s.profiles = map[int64]botapi.UserProfilePhotos{}
+	s.joinRequests = map[int64]map[int64]*botapi.ChatJoinRequest{}
 	s.wakeLocked()
 }
 
