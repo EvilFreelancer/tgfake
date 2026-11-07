@@ -93,6 +93,12 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `getChatMember` | `chat_id`, `user_id` | A configured/inferred `ChatMember`; a known user outside the chat has status `left`. |
 | `getChatAdministrators` | `chat_id` | Every creator/administrator member, other bots included, ordered by user id. |
 | `getChatMemberCount` | `chat_id` | The number of present members. |
+| `restrictChatMember` | `chat_id`, `user_id`, `permissions`, `use_independent_chat_permissions`, `until_date` | `true`; stores a restricted member, or a member when every permission is true. |
+| `banChatMember` | `chat_id`, `user_id`, `until_date`, `revoke_messages` | `true`; stores the member as `kicked`. |
+| `unbanChatMember` | `chat_id`, `user_id`, `only_if_banned` | `true`; stores the member as `left` when applicable. |
+| `promoteChatMember` | `chat_id`, `user_id`, administrator `can_*` fields | `true`; stores an administrator, or demotes when every right is false. |
+| `setChatPermissions` | `chat_id`, `permissions`, `use_independent_chat_permissions` | `true`; replaces the default permissions returned by `getChat`. |
+| `setChatAdministratorCustomTitle` | `chat_id`, `user_id`, `custom_title` | `true`; changes the administrator member record. |
 | `getUserProfilePhotos` | `user_id`, `offset`, `limit` | Configured profile photos; a known user has an empty list by default. |
 
 Messages, updates, keyboards and the other objects have the shapes of the types in [`pkg/botapi`](../pkg/botapi/types.go).
@@ -132,7 +138,7 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Webhooks.** Updates are delivered oldest first, one request at a time. A 2xx response confirms the update; failures retain it, update `last_error_date`/`last_error_message` and retry after one second. A JSON response containing `method` and parameters can call a Bot API method. Changing or deleting the webhook cancels an in-flight request without losing its queued update; `Close` cancels delivery and media URL downloads. Localhost/loopback HTTP URLs and arbitrary local ports are allowed so a test can run its receiver offline. Other URLs must be HTTPS on Telegram's allowed ports. For container test networks, `--allow-http-webhook` (`Options.AllowHTTPWebhook`) explicitly permits non-loopback HTTP URLs on any port, such as `http://bot:8080/webhook`. This exception is off by default; HTTPS URL and secret-token checks remain unchanged. Uploaded PEM certificates extend the client's trust roots. `max_connections` is reported but delivery stays serialized; `ip_address` is reported without overriding DNS.
 
-**Chat information.** A chat starts with the bot as a member; injected users become members unless a test configured their status. `/sim/chat/configure` supplies metadata and membership, including administrators, restricted and absent users. `/sim/user/profile` supplies photo sets using known photo ids. Configured information is copied and reset with the session; querying it never changes membership.
+**Chat information and moderation.** A chat starts with the bot as a member; injected users become members unless a test configured their status. `/sim/chat/configure` supplies metadata and membership, including administrators, restricted and absent users. Moderation methods mutate those same records, so `getChatMember`, `getChatAdministrators` and the member count immediately reflect them. Restriction and ban dates less than 30 seconds or more than 366 days ahead are stored as `0` (forever), matching Telegram. `/sim/user/profile` supplies photo sets using known photo ids. Configured information is copied and reset with the session.
 
 **Callback queries.** A tap through the simulation API mints a query id `cbq-1`, `cbq-2` and so on. A query takes one answer: once answered it is forgotten, so a second answer is refused like an unknown one, and so is an answer to a query minted before a reset. The answers are listed in the chat's `callbacks` with their `text` and `show_alert`.
 
@@ -282,7 +288,7 @@ The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate
 
 ## Not implemented
 
-- Methods outside the [table above](#methods) answer `404` with `Not Found: method not found`, including stickers, polls, live photos, games, forum topics and chat administration mutations.
+- Methods outside the [table above](#methods) answer `404` with `Not Found: method not found`, including stickers, polls, live photos, games and forum topics.
 - Incoming location/contact messages, `edited_message`, `channel_post`, membership and reaction updates are not injected. Chat configuration changes no update queue.
 - Inline games/stickers, rich input content, cache behavior, pagination buttons and query timeouts are not modelled. `cache_time`, `is_personal`, `next_offset` and the inline results button are only recorded.
 - Payments go no further than a bot can see: a payment provider, shipping, order info and `order_info` on the pre-checkout query and the payment are not modelled, `shipping_query` is never sent, and a charge can only be taken or returned - never left pending. `is_ephemeral` of a command is kept but a message is never ephemeral.
