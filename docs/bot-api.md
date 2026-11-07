@@ -283,6 +283,7 @@ Additional refusals for the extended methods:
 | inline answer | unknown/already answered query / over 50 results / invalid or duplicate result id | The query error above / `Bad Request: too many inline query results specified` / `Bad Request: RESULT_ID_INVALID` / `Bad Request: RESULT_ID_DUPLICATE`. |
 | `answerWebAppQuery` | launch query unknown, reset or already consumed | The query error above. |
 | chat information | chat unknown / invalid or unknown user | `Bad Request: chat not found` / `Bad Request: invalid user_id specified` / `Bad Request: user not found` |
+| any method naming an upgraded basic group | always | `Bad Request: group chat was upgraded to a supergroup chat`, with `parameters.migrate_to_chat_id` |
 | `getUpdates` | webhook active (409) | `Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first` |
 | `setWebhook` | malformed URL / external HTTP / unsupported external port | `Bad Request: invalid webhook URL specified` / `Bad Request: bad webhook: An HTTPS URL must be provided for webhook` / `Bad Request: bad webhook: Webhook can be set up only on ports 80, 88, 443 or 8443` |
 | `setWebhook` | secret over 256 bytes / characters outside A-Z, a-z, 0-9, `_`, `-` | `Bad Request: secret token is too long` / `Bad Request: secret token contains illegal characters` |

@@ -30,6 +30,7 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | `GET /sim/inline` | Read queries and the bot's offered results. |
 | `POST /sim/inline/choose` | Select an offered result and queue `chosen_inline_result`. |
 | `POST /sim/chat/configure` | Configure chat metadata and members. |
+| `POST /sim/chat/migrate` | Upgrade a group to a new supergroup and emit both migration service messages. |
 | `POST /sim/member` | Inject a member or bot join, leave, or promotion lifecycle event. |
 | `POST /sim/join-request` | Inject a `chat_join_request` for approval or decline by the bot. |
 | `POST /sim/user/profile` | Configure a user's profile photos. |

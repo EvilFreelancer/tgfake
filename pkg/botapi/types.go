@@ -320,6 +320,8 @@ type Message struct {
 	ReplyMarkup         *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
 	NewChatMembers      []User                `json:"new_chat_members,omitempty"`
 	LeftChatMember      *User                 `json:"left_chat_member,omitempty"`
+	MigrateToChatID     int64                 `json:"migrate_to_chat_id,omitempty"`
+	MigrateFromChatID   int64                 `json:"migrate_from_chat_id,omitempty"`
 }
 
 type ChatMemberUpdated struct {
