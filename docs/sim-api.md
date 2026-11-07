@@ -39,6 +39,9 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | `GET /sim/file/{id}` | The bytes of any stored incoming or outgoing media. |
 | `GET /sim/chats` | The chats the stand knows. |
 | `GET /sim/state` | The bot, the update queue, the subscription, the commands, the menu button and the faults. |
+| `GET /sim/clock` | Read the server clock. |
+| `POST /sim/clock/advance` | Move the server clock by a signed number of seconds. |
+| `POST /sim/clock/set` | Set the server clock to a Unix timestamp. |
 | `POST /sim/webapp/launch` | The person opens a Mini App. |
 | `POST /sim/webapp/data` | Deliver a Mini App's `web_app_data` service message. |
 | `POST /sim/webapp/share` | Share a prepared inline message for its designated user. |
@@ -474,9 +477,17 @@ Starts a new session without restarting the command. It answers `{"ok":true}` an
 
 Update ids keep growing: a bot that is polling remembers the last id it confirmed and would drop anything numbered below it. The `allowed_updates` subscription, configured webhook and signing token stay. Inline/prepared id counters also keep growing to avoid collisions with retained client ids. A Serverless project's database is not reset.
 
+The simulation clock also stays unchanged across reset.
+
 ```bash
 curl -s -X POST $O/sim/reset
 ```
+
+## Simulation clock
+
+`GET /sim/clock` returns `{"unix":1760000000,"time":"2025-10-09T08:53:20Z"}`. `POST /sim/clock/advance` accepts `{"seconds":3600}` (negative values move it backwards), and `POST /sim/clock/set` accepts `{"unix":1760000000}`. Message and call dates, temporary moderation expiry, drafts, typing, prepared messages, webhooks and Mini App signing use this clock. Long-poll and network-delay waits remain real durations, so advancing time never blocks an HTTP request.
+
+In-process tests can set `Options.Now` to provide a deterministic base clock. With no option, the clock follows real time; advance/set apply an offset to it.
 
 ## Recipes
 

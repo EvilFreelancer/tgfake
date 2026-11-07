@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/EvilFreelancer/tgfake/pkg/webapp"
 )
@@ -24,6 +25,9 @@ import (
 //	GET  /sim/file/{id}
 //	GET  /sim/chats
 //	GET  /sim/state
+//	GET  /sim/clock
+//	POST /sim/clock/advance     {seconds}
+//	POST /sim/clock/set         {unix}
 //	POST /sim/webapp/launch     {chat_id, user_id, username, first_name, url, start_param, color_scheme, platform, version}
 //	GET  /sim/webapp/theme/{light|dark}
 //	POST /sim/fault             {method, code, description, retry_after, times, contains, chat_id, target, path, delay_ms, disconnect, after_apply} or {method | target, clear: true}
@@ -42,6 +46,9 @@ func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sim/file/{id}", s.simFile)
 	mux.HandleFunc("GET /sim/chats", s.simChats)
 	mux.HandleFunc("GET /sim/state", s.simState)
+	mux.HandleFunc("GET /sim/clock", s.simClock)
+	mux.HandleFunc("POST /sim/clock/advance", s.simClockAdvance)
+	mux.HandleFunc("POST /sim/clock/set", s.simClockSet)
 	mux.HandleFunc("POST /sim/webapp/launch", s.simWebAppLaunch)
 	mux.HandleFunc("GET /sim/webapp/theme/{scheme}", s.simWebAppTheme)
 	mux.HandleFunc("POST /sim/fault", s.simFault)
@@ -55,6 +62,44 @@ func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sim/webapp/share", s.simSharePrepared)
 	mux.HandleFunc("POST /sim/media", s.simMedia)
 	mux.HandleFunc("POST /sim/user/profile", s.simUserProfile)
+}
+
+func (s *Server) simClock(w http.ResponseWriter, _ *http.Request) {
+	writeClock(w, s.now())
+}
+
+func (s *Server) simClockAdvance(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Seconds int64 `json:"seconds"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	s.clockMu.Lock()
+	s.clockOffset += time.Duration(in.Seconds) * time.Second
+	base := s.clockBase()
+	now := base.Add(s.clockOffset)
+	s.clockMu.Unlock()
+	writeClock(w, now)
+}
+
+func (s *Server) simClockSet(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Unix int64 `json:"unix"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	s.clockMu.Lock()
+	base := s.clockBase()
+	s.clockOffset = time.Unix(in.Unix, 0).Sub(base)
+	now := base.Add(s.clockOffset)
+	s.clockMu.Unlock()
+	writeClock(w, now)
+}
+
+func writeClock(w http.ResponseWriter, now time.Time) {
+	writeJSON(w, http.StatusOK, map[string]any{"unix": now.Unix(), "time": now.Format(time.RFC3339Nano)})
 }
 
 func (s *Server) simMessage(w http.ResponseWriter, r *http.Request) {
