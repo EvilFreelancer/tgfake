@@ -328,6 +328,16 @@ type ChatJoinRequest struct {
 	InviteLink map[string]any `json:"invite_link,omitempty"`
 }
 
+type MessageReactionUpdated struct {
+	Chat        Chat             `json:"chat"`
+	MessageID   int              `json:"message_id"`
+	User        *User            `json:"user,omitempty"`
+	ActorChat   *Chat            `json:"actor_chat,omitempty"`
+	Date        int64            `json:"date"`
+	OldReaction []map[string]any `json:"old_reaction"`
+	NewReaction []map[string]any `json:"new_reaction"`
+}
+
 // CallbackQuery is what a tap on an inline button delivers.
 type CallbackQuery struct {
 	ID           string   `json:"id"`
@@ -352,6 +362,7 @@ type MessageGenerationStopped struct {
 type Update struct {
 	UpdateID                 int                       `json:"update_id"`
 	Message                  *Message                  `json:"message,omitempty"`
+	EditedMessage            *Message                  `json:"edited_message,omitempty"`
 	CallbackQuery            *CallbackQuery            `json:"callback_query,omitempty"`
 	PreCheckoutQuery         *PreCheckoutQuery         `json:"pre_checkout_query,omitempty"`
 	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation,omitempty"`
@@ -360,6 +371,7 @@ type Update struct {
 	ChatMember               *ChatMemberUpdated        `json:"chat_member,omitempty"`
 	MyChatMember             *ChatMemberUpdated        `json:"my_chat_member,omitempty"`
 	ChatJoinRequest          *ChatJoinRequest          `json:"chat_join_request,omitempty"`
+	MessageReaction          *MessageReactionUpdated   `json:"message_reaction,omitempty"`
 }
 
 // BotCommand is one entry of setMyCommands.

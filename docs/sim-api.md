@@ -23,6 +23,8 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | Method and path | What it does |
 |-----------------|--------------|
 | `POST /sim/message` | The person sends a text message. |
+| `POST /sim/message/edit` | Edit an existing incoming message and inject `edited_message`. |
+| `POST /sim/reaction` | Inject a `message_reaction` update. |
 | `POST /sim/media` | The person sends a file, photo, video or audio message. |
 | `POST /sim/inline` | Inject an inline query (requires `--inline`). |
 | `GET /sim/inline` | Read queries and the bot's offered results. |
