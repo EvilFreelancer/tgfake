@@ -144,6 +144,33 @@ Configuration replaces metadata and membership, preserves the transcript and cre
 curl -s -X POST $O/sim/chat/configure -d '{"chat":{"id":-100,"type":"supergroup","title":"Test","username":"test_group"},"members":[{"status":"creator","is_anonymous":false,"user":{"id":4242,"is_bot":false,"first_name":"Alice"}}]}'
 ```
 
+## Membership and lifecycle injection
+
+`POST /sim/member` accepts `chat_id`, `action` (`join`, `leave` or
+`promote`), a Bot API `user`, and optional `invite_link` and administrator
+`rights`. Join and leave append the corresponding service message and queue a
+`chat_member` update; a transition of the configured bot queues
+`my_chat_member`. Promotion changes the member record without a service
+message. Bot moderation methods queue the same membership update when the
+active `allowed_updates` subscription includes it.
+
+`POST /sim/join-request` accepts `chat_id`, `user`, optional `bio` and
+`invite_link`, stores the pending request and queues `chat_join_request`.
+`approveChatJoinRequest` consumes it, adds the member and queues
+`chat_member`; decline only consumes it. A missing request is refused with
+`Bad Request: HIDE_REQUESTER_MISSING`.
+
+`POST /sim/message/edit` accepts `chat_id`, `message_id`, replacement `text`
+and optional `entities`, updates the transcript and queues `edited_message`.
+`POST /sim/reaction` accepts `chat_id`, `message_id`, `user` or `actor_chat`,
+and `old_reaction`/`new_reaction` arrays, then queues `message_reaction`.
+
+`POST /sim/chat/migrate` accepts `chat_id` of a basic group and an unused
+`new_chat_id`. It creates the supergroup, copies members and metadata, and
+queues the old `migrate_to_chat_id` and new `migrate_from_chat_id` service
+messages. Later Bot API calls naming the old group receive Telegram's upgrade
+error and `parameters.migrate_to_chat_id`.
+
 ## POST /sim/user/profile
 
 The body is `{"user":{...},"photos":[[PhotoSize,...],...]}`. The user needs a positive id, and each non-empty photo size array must reference known photo file ids. Dimensions, unique ids and sizes are normalized from stored files. This registers the user and replaces their photo sets for `getUserProfilePhotos`; no update is created. An empty list clears photos. The answer is `{"ok":true}`.
