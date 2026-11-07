@@ -25,7 +25,9 @@ type IncomingMessage struct {
 	ReplyToMessageID int `json:"reply_to_message_id,omitempty"`
 	// Mention prefixes the text with the bot's @username, which is how a
 	// group message addresses the bot.
-	Mention bool `json:"mention,omitempty"`
+	Mention            bool         `json:"mention,omitempty"`
+	SenderChat         *botapi.Chat `json:"sender_chat,omitempty"`
+	IsAutomaticForward bool         `json:"is_automatic_forward,omitempty"`
 }
 
 // IncomingCallback is a tap on an inline keyboard button. The button is
@@ -123,6 +125,11 @@ func (s *Server) incomingMessageProblem(in IncomingMessage) string {
 
 func (s *Server) injectMessageLocked(in IncomingMessage) (updateID, messageID int) {
 	from := &botapi.User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username}
+	if in.SenderChat != nil && in.SenderChat.ID == in.ChatID {
+		from = &botapi.User{ID: 1087968824, IsBot: true, FirstName: "Group", Username: "GroupAnonymousBot"}
+	} else if in.SenderChat != nil {
+		from = nil
+	}
 	text := in.Text
 	var entities []botapi.MessageEntity
 	if in.Mention {
@@ -136,11 +143,13 @@ func (s *Server) injectMessageLocked(in IncomingMessage) (updateID, messageID in
 
 	chat := s.ensureChatLocked(in.ChatID, in.ChatType, in.ChatTitle, from)
 	msg := &botapi.Message{
-		From:     from,
-		Chat:     chat.wire(),
-		Date:     s.now().Unix(),
-		Text:     text,
-		Entities: entities,
+		From:               from,
+		Chat:               chat.wire(),
+		Date:               s.now().Unix(),
+		Text:               text,
+		Entities:           entities,
+		SenderChat:         in.SenderChat,
+		IsAutomaticForward: in.IsAutomaticForward,
 	}
 	if in.ReplyToMessageID != 0 {
 		if target := chat.byID[in.ReplyToMessageID]; target != nil {

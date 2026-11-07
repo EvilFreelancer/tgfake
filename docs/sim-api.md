@@ -71,6 +71,8 @@ The person types a message. It is stored in the chat and becomes the next `messa
 | `chat_title` | string | `Fake group` for a group | The title of a group chat, set when the chat has none yet. |
 | `reply_to_message_id` | integer | none | Makes the message a reply to a message of the chat. An id that is not in the chat is ignored. |
 | `mention` | boolean | `false` | Puts the bot's `@username` and a space in front of the text, with a `mention` entity: how a group message addresses the bot. |
+| `sender_chat` | Chat | none | The group itself for an anonymous administrator, or a linked channel for an automatic post. |
+| `is_automatic_forward` | boolean | `false` | Marks a linked-channel post. |
 
 A text that starts with a command, such as `/start` or `/help@tgfake_bot`, carries a `bot_command` entity at offset 0, which is what makes it a command for every Bot API library.
 

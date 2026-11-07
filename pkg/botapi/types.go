@@ -273,6 +273,7 @@ type MessageOrigin struct {
 type Message struct {
 	MessageID           int                   `json:"message_id"`
 	From                *User                 `json:"from,omitempty"`
+	SenderChat          *Chat                 `json:"sender_chat,omitempty"`
 	Chat                Chat                  `json:"chat"`
 	Date                int64                 `json:"date"`
 	EditDate            int64                 `json:"edit_date,omitempty"`
@@ -296,6 +297,7 @@ type Message struct {
 	ForwardOrigin       *MessageOrigin        `json:"forward_origin,omitempty"`
 	ViaBot              *User                 `json:"via_bot,omitempty"`
 	HasProtectedContent bool                  `json:"has_protected_content,omitempty"`
+	IsAutomaticForward  bool                  `json:"is_automatic_forward,omitempty"`
 	Entities            []MessageEntity       `json:"entities,omitempty"`
 	CaptionEntities     []MessageEntity       `json:"caption_entities,omitempty"`
 	ReplyToMessage      *Message              `json:"reply_to_message,omitempty"`
