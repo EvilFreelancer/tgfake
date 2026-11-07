@@ -300,6 +300,17 @@ type Message struct {
 	CaptionEntities     []MessageEntity       `json:"caption_entities,omitempty"`
 	ReplyToMessage      *Message              `json:"reply_to_message,omitempty"`
 	ReplyMarkup         *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	NewChatMembers      []User                `json:"new_chat_members,omitempty"`
+	LeftChatMember      *User                 `json:"left_chat_member,omitempty"`
+}
+
+type ChatMemberUpdated struct {
+	Chat          Chat           `json:"chat"`
+	From          User           `json:"from"`
+	Date          int64          `json:"date"`
+	OldChatMember ChatMember     `json:"old_chat_member"`
+	NewChatMember ChatMember     `json:"new_chat_member"`
+	InviteLink    map[string]any `json:"invite_link,omitempty"`
 }
 
 // CallbackQuery is what a tap on an inline button delivers.
@@ -331,6 +342,8 @@ type Update struct {
 	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation,omitempty"`
 	InlineQuery              *InlineQuery              `json:"inline_query,omitempty"`
 	ChosenInlineResult       *ChosenInlineResult       `json:"chosen_inline_result,omitempty"`
+	ChatMember               *ChatMemberUpdated        `json:"chat_member,omitempty"`
+	MyChatMember             *ChatMemberUpdated        `json:"my_chat_member,omitempty"`
 }
 
 // BotCommand is one entry of setMyCommands.

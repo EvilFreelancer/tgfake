@@ -147,6 +147,7 @@ func (s *Server) moderateChat(w http.ResponseWriter, method string, params url.V
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: user not found", 0)
 		return
 	}
+	oldMember := cloneMap(member)
 	if status := stringOf(member["status"]); status == "creator" && lower != "setchatadministratorcustomtitle" {
 		s.mu.Unlock()
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't remove chat owner", 0)
@@ -194,6 +195,10 @@ func (s *Server) moderateChat(w http.ResponseWriter, method string, params url.V
 		}
 	case "setchatadministratorcustomtitle":
 		member["custom_title"] = params.Get("custom_title")
+	}
+	if lower != "setchatadministratorcustomtitle" {
+		updated := s.memberUpdatedLocked(chat, *s.botUser(), oldMember, chat.members[userID], nil)
+		s.pushMembershipUpdateLocked(userID, updated)
 	}
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)

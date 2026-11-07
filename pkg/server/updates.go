@@ -323,6 +323,10 @@ func updateKind(u botapi.Update) string {
 		return "pre_checkout_query"
 	case u.StoppedMessageGeneration != nil:
 		return "stopped_message_generation"
+	case u.MyChatMember != nil:
+		return "my_chat_member"
+	case u.ChatMember != nil:
+		return "chat_member"
 	default:
 		return "message"
 	}

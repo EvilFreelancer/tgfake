@@ -28,6 +28,7 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | `GET /sim/inline` | Read queries and the bot's offered results. |
 | `POST /sim/inline/choose` | Select an offered result and queue `chosen_inline_result`. |
 | `POST /sim/chat/configure` | Configure chat metadata and members. |
+| `POST /sim/member` | Inject a member or bot join, leave, or promotion lifecycle event. |
 | `POST /sim/user/profile` | Configure a user's profile photos. |
 | `POST /sim/callback` | The person taps an inline keyboard button. |
 | `POST /sim/draft/stop` | The person presses Stop under a streamed draft. |
