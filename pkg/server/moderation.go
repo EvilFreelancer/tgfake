@@ -111,6 +111,16 @@ func (s *Server) moderateChat(w http.ResponseWriter, method string, params url.V
 		return
 	}
 	lower := strings.ToLower(method)
+	if (lower == "restrictchatmember" || lower == "promotechatmember" || lower == "setchatpermissions" || lower == "setchatadministratorcustomtitle") && chat.typ != "supergroup" {
+		s.mu.Unlock()
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: method is available only for supergroups", 0)
+		return
+	}
+	if problem := s.moderationRightsProblemLocked(chat, lower); problem != "" {
+		s.mu.Unlock()
+		s.writeError(w, method, params, http.StatusBadRequest, problem, 0)
+		return
+	}
 	if lower == "setchatpermissions" {
 		permissions, valid := permissionsOf(params)
 		if !valid {
@@ -125,10 +135,25 @@ func (s *Server) moderateChat(w http.ResponseWriter, method string, params url.V
 		return
 	}
 	userID := integerOf(params.Get("user_id"))
+	if userID == s.opts.BotID {
+		s.mu.Unlock()
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: PARTICIPANT_ID_INVALID", 0)
+		return
+	}
+	expireMemberLocked(chat, userID, s.now())
 	member := chat.members[userID]
 	if userID <= 0 || member == nil {
 		s.mu.Unlock()
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: user not found", 0)
+		return
+	}
+	if status := stringOf(member["status"]); status == "creator" && lower != "setchatadministratorcustomtitle" {
+		s.mu.Unlock()
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: can't remove chat owner", 0)
+		return
+	} else if status == "administrator" && (lower == "restrictchatmember" || lower == "banchatmember") {
+		s.mu.Unlock()
+		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: user is an administrator of the chat", 0)
 		return
 	}
 	switch lower {
@@ -172,4 +197,48 @@ func (s *Server) moderateChat(w http.ResponseWriter, method string, params url.V
 	}
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)
+}
+
+func (s *Server) moderationRightsProblemLocked(chat *chatState, method string) string {
+	bot := chat.members[s.opts.BotID]
+	if bot == nil || (bot["status"] != "administrator" && bot["status"] != "creator") {
+		return "Bad Request: CHAT_ADMIN_REQUIRED"
+	}
+	if bot["status"] == "creator" {
+		return ""
+	}
+	switch method {
+	case "restrictchatmember", "banchatmember", "unbanchatmember", "setchatpermissions":
+		if bot["can_restrict_members"] != true {
+			return "Bad Request: not enough rights to restrict/unrestrict chat member"
+		}
+	case "promotechatmember", "setchatadministratorcustomtitle":
+		if bot["can_promote_members"] != true {
+			return "Bad Request: not enough rights to promote/demote chat member"
+		}
+	}
+	return ""
+}
+
+func expireMemberLocked(chat *chatState, userID int64, now time.Time) {
+	member := chat.members[userID]
+	if member == nil {
+		return
+	}
+	until := integerOf(member["until_date"])
+	if until <= 0 || now.Unix() < until {
+		return
+	}
+	switch member["status"] {
+	case "restricted":
+		chat.members[userID] = map[string]any{"status": "member", "user": member["user"]}
+	case "kicked":
+		chat.members[userID] = map[string]any{"status": "left", "user": member["user"]}
+	}
+}
+
+func expireMembersLocked(chat *chatState, now time.Time) {
+	for userID := range chat.members {
+		expireMemberLocked(chat, userID, now)
+	}
 }

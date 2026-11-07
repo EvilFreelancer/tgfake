@@ -87,3 +87,59 @@ func TestPromoteDemotePermissionsAndTitle(t *testing.T) {
 		t.Fatalf("permissions: %d %#v", code, permissions)
 	}
 }
+
+func TestModerationEnforcesRightsAndProtectedTargets(t *testing.T) {
+	s := moderationStand(t)
+	for _, tc := range []struct {
+		name, method, userID, want string
+	}{
+		{"self", "banChatMember", "7001", "Bad Request: PARTICIPANT_ID_INVALID"},
+		{"administrator", "banChatMember", "99", "Bad Request: user is an administrator of the chat"},
+		{"creator", "restrictChatMember", "100", "Bad Request: can't remove chat owner"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.userID != "7001" {
+				s.fake.mu.Lock()
+				status := "administrator"
+				if tc.userID == "100" {
+					status = "creator"
+				}
+				s.fake.chats[-100].members[integerOf(tc.userID)] = map[string]any{"status": status, "user": map[string]any{"id": integerOf(tc.userID), "is_bot": false, "first_name": "Protected"}}
+				s.fake.mu.Unlock()
+			}
+			code, body := s.call(tc.method, url.Values{"chat_id": {"-100"}, "user_id": {tc.userID}, "permissions": {`{"can_send_messages":false}`}})
+			if code != 400 || body["description"] != tc.want {
+				t.Fatalf("got %d %v", code, body)
+			}
+		})
+	}
+
+	s.fake.mu.Lock()
+	s.fake.chats[-100].members[7001]["can_restrict_members"] = false
+	s.fake.mu.Unlock()
+	code, body := s.call("banChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}})
+	if code != 400 || body["description"] != "Bad Request: not enough rights to restrict/unrestrict chat member" {
+		t.Fatalf("rights: %d %v", code, body)
+	}
+}
+
+func TestSimMessageEnforcesMembershipAndRestrictionExpiry(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	s := moderationStand(t)
+	s.fake.now = func() time.Time { return now }
+	s.call("restrictChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}, "permissions": {`{"can_send_messages":false}`}, "until_date": {fmt.Sprint(now.Add(time.Hour).Unix())}})
+	code, body := s.sim("POST", "/sim/message", map[string]any{"chat_id": -100, "chat_type": "supergroup", "user_id": 42, "text": "blocked"})
+	if code != 403 || body["error"] != "sender is restricted from sending messages" {
+		t.Fatalf("restricted: %d %v", code, body)
+	}
+	now = now.Add(2 * time.Hour)
+	code, body = s.sim("POST", "/sim/message", map[string]any{"chat_id": -100, "chat_type": "supergroup", "user_id": 42, "text": "allowed"})
+	if code != 200 {
+		t.Fatalf("expired restriction: %d %v", code, body)
+	}
+	s.call("banChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}})
+	code, body = s.sim("POST", "/sim/message", map[string]any{"chat_id": -100, "chat_type": "supergroup", "user_id": 42, "text": "blocked"})
+	if code != 403 || body["error"] != "sender is not a member of the chat" {
+		t.Fatalf("kicked: %d %v", code, body)
+	}
+}

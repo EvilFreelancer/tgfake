@@ -69,6 +69,8 @@ The person types a message. It is stored in the chat and becomes the next `messa
 
 A text that starts with a command, such as `/start` or `/help@tgfake_bot`, carries a `bot_command` entity at offset 0, which is what makes it a command for every Bot API library.
 
+In a configured group, a sender whose member status is `left` or `kicked`, or a restricted member without `can_send_messages`, is refused with HTTP 403 and a simulation `error`. An expired temporary restriction is cleared before this check.
+
 The answer is the id of the update and the id of the message in its chat:
 
 ```bash

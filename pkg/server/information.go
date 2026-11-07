@@ -212,6 +212,7 @@ func (s *Server) chatInformation(w http.ResponseWriter, method string, params ur
 		if !ok || chat == nil {
 			problem = "Bad Request: chat not found"
 		} else {
+			expireMembersLocked(chat, s.now())
 			switch strings.ToLower(method) {
 			case "getchat":
 				raw, _ := json.Marshal(chat.wire())

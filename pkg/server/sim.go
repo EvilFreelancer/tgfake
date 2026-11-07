@@ -66,6 +66,10 @@ func (s *Server) simMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "text is empty"})
 		return
 	}
+	if problem := s.incomingMessageProblem(in); problem != "" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": problem})
+		return
+	}
 	upd, msgID := s.InjectMessage(in)
 	writeJSON(w, http.StatusOK, map[string]any{"update_id": upd, "message_id": msgID})
 }

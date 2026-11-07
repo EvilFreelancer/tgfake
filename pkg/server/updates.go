@@ -92,6 +92,35 @@ func (s *Server) InjectMessage(in IncomingMessage) (updateID, messageID int) {
 	return s.injectMessageLocked(in)
 }
 
+// incomingMessageProblem enforces membership for the simulation HTTP API.
+// Direct InjectMessage remains a low-level fixture helper for Go tests.
+func (s *Server) incomingMessageProblem(in IncomingMessage) string {
+	in.normalize()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat := s.chats[in.ChatID]
+	if chat == nil {
+		return ""
+	}
+	expireMemberLocked(chat, in.UserID, s.now())
+	member := chat.members[in.UserID]
+	if member == nil {
+		return ""
+	}
+	switch member["status"] {
+	case "left", "kicked":
+		return "sender is not a member of the chat"
+	case "restricted":
+		if member["is_member"] == false {
+			return "sender is not a member of the chat"
+		}
+		if member["can_send_messages"] != true {
+			return "sender is restricted from sending messages"
+		}
+	}
+	return ""
+}
+
 func (s *Server) injectMessageLocked(in IncomingMessage) (updateID, messageID int) {
 	from := &botapi.User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username}
 	text := in.Text
