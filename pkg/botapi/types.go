@@ -291,6 +291,8 @@ type Message struct {
 	SenderChat          *Chat                 `json:"sender_chat,omitempty"`
 	Chat                Chat                  `json:"chat"`
 	Date                int64                 `json:"date"`
+	MessageThreadID     int                   `json:"message_thread_id,omitempty"`
+	IsTopicMessage      bool                  `json:"is_topic_message,omitempty"`
 	EditDate            int64                 `json:"edit_date,omitempty"`
 	Text                string                `json:"text,omitempty"`
 	Caption             string                `json:"caption,omitempty"`
