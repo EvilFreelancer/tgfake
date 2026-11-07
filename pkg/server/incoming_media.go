@@ -172,6 +172,10 @@ func (s *Server) simMedia(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 400, map[string]any{"error": "invalid JSON body: " + err.Error()})
 		return
 	}
+	if problem := s.incomingMessageProblem(in.IncomingMessage); problem != "" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": problem})
+		return
+	}
 	update, message, err := s.InjectMedia(in)
 	if err != nil {
 		writeJSON(w, 400, map[string]any{"error": err.Error()})

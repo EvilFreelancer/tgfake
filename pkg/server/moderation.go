@@ -35,7 +35,7 @@ func boolFields(params url.Values, fields []string) map[string]any {
 func permissionsOf(params url.Values) (map[string]any, bool) {
 	var permissions map[string]any
 	if raw := strings.TrimSpace(params.Get("permissions")); raw != "" {
-		if json.Unmarshal([]byte(raw), &permissions) != nil {
+		if json.Unmarshal([]byte(raw), &permissions) != nil || permissions == nil {
 			return nil, false
 		}
 	} else {

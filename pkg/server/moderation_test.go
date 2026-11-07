@@ -34,6 +34,22 @@ func memberResult(t *testing.T, s *stand, userID int64) map[string]any {
 	return result(t, body)
 }
 
+// A permissions payload of JSON null unmarshals into a nil map; it must be
+// refused like any other value that is not a permissions object, not panic
+// the handler while it holds the server lock.
+func TestModerationRejectsNullPermissions(t *testing.T) {
+	s := moderationStand(t)
+	for _, method := range []string{"setChatPermissions", "restrictChatMember"} {
+		code, body := s.call(method, url.Values{"chat_id": {"-100"}, "user_id": {"42"}, "permissions": {"null"}})
+		if code != 400 || body["description"] != "Bad Request: can't parse chat permissions JSON object" {
+			t.Fatalf("%s with null permissions: %d %v", method, code, body)
+		}
+	}
+	if got := memberResult(t, s, 42)["status"]; got != "member" {
+		t.Fatalf("a refused restrict changed the member: %v", got)
+	}
+}
+
 func TestModerationMutations(t *testing.T) {
 	s := moderationStand(t)
 	until := time.Now().Add(time.Hour).Unix()
@@ -120,6 +136,20 @@ func TestModerationEnforcesRightsAndProtectedTargets(t *testing.T) {
 	code, body := s.call("banChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}})
 	if code != 400 || body["description"] != "Bad Request: not enough rights to restrict/unrestrict chat member" {
 		t.Fatalf("rights: %d %v", code, body)
+	}
+}
+
+// Media goes through the same membership check as a text message: a kicked
+// member's photo is refused before it becomes an update.
+func TestSimMediaEnforcesMembership(t *testing.T) {
+	s := moderationStand(t)
+	s.call("banChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}})
+	code, body := s.sim("POST", "/sim/media", map[string]any{
+		"chat_id": -100, "chat_type": "supergroup", "user_id": 42,
+		"type": "photo", "data": "aGVsbG8=", "file_name": "x.png",
+	})
+	if code != 403 || body["error"] != "sender is not a member of the chat" {
+		t.Fatalf("kicked member's media: %d %v", code, body)
 	}
 }
 
