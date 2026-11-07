@@ -143,3 +143,52 @@ func TestSimMessageEnforcesMembershipAndRestrictionExpiry(t *testing.T) {
 		t.Fatalf("kicked: %d %v", code, body)
 	}
 }
+
+func TestChatMemberVariantsContainRequiredPTBFields(t *testing.T) {
+	s := moderationStand(t)
+	s.call("restrictChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}, "permissions": {`{"can_send_messages":false}`}})
+	restricted := memberResult(t, s, 42)
+	requiredRestricted := append([]string{"status", "user", "is_member", "until_date"}, permissionFields...)
+	for _, field := range requiredRestricted {
+		if _, ok := restricted[field]; !ok {
+			t.Errorf("restricted member misses %q: %#v", field, restricted)
+		}
+	}
+	if restricted["can_edit_tag"] != false {
+		t.Fatalf("can_edit_tag = %v", restricted["can_edit_tag"])
+	}
+
+	s.call("promoteChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}, "can_delete_messages": {"true"}})
+	administrator := memberResult(t, s, 42)
+	for _, field := range append([]string{"status", "user", "can_be_edited"}, administratorFields...) {
+		if _, ok := administrator[field]; !ok {
+			t.Errorf("administrator misses %q: %#v", field, administrator)
+		}
+	}
+
+	s.call("promoteChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}})
+	member := memberResult(t, s, 42)
+	for _, field := range []string{"status", "user"} {
+		if _, ok := member[field]; !ok {
+			t.Errorf("member misses %q: %#v", field, member)
+		}
+	}
+}
+
+func TestConfiguredRestrictedMemberDefaultsCanEditTag(t *testing.T) {
+	s := newStand(t, Options{BotID: 7001})
+	err := s.fake.ConfigureChat(ChatConfiguration{
+		Chat: botapi.ChatFullInfo{"id": int64(-100), "type": "supergroup"},
+		Members: []botapi.ChatMember{{
+			"status": "restricted",
+			"user":   map[string]any{"id": int64(42), "is_bot": false, "first_name": "Bob"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	member := memberResult(t, s, 42)
+	if value, ok := member["can_edit_tag"]; !ok || value != false {
+		t.Fatalf("can_edit_tag default = %v (present %v): %#v", value, ok, member)
+	}
+}
