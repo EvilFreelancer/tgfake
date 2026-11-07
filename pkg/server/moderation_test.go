@@ -192,3 +192,22 @@ func TestConfiguredRestrictedMemberDefaultsCanEditTag(t *testing.T) {
 		t.Fatalf("can_edit_tag default = %v (present %v): %#v", value, ok, member)
 	}
 }
+
+func TestUnrestrictDoesNotRequireCanEditTag(t *testing.T) {
+	s := moderationStand(t)
+	s.call("restrictChatMember", url.Values{"chat_id": {"-100"}, "user_id": {"42"}, "permissions": {`{"can_send_messages":false}`}})
+	permissions := url.Values{"chat_id": {"-100"}, "user_id": {"42"}, "use_independent_chat_permissions": {"true"}}
+	for _, field := range permissionFields {
+		if field != "can_edit_tag" {
+			permissions.Set(field, "true")
+		}
+	}
+	permissions.Set("can_edit_tag", "false")
+	code, body := s.call("restrictChatMember", permissions)
+	if code != 200 {
+		t.Fatalf("unrestrict: %d %v", code, body)
+	}
+	if member := memberResult(t, s, 42); member["status"] != "member" {
+		t.Fatalf("status = %v, member: %#v", member["status"], member)
+	}
+}

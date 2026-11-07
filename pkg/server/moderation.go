@@ -82,6 +82,11 @@ func expandPermissions(p map[string]any, independent bool) {
 
 func allPermissions(p map[string]any) bool {
 	for _, field := range permissionFields {
+		// can_edit_tag controls whether a restricted member may edit their
+		// member tag; Telegram does not require it when lifting restrictions.
+		if field == "can_edit_tag" {
+			continue
+		}
 		if p[field] != true {
 			return false
 		}
