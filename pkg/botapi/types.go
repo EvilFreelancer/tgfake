@@ -27,9 +27,12 @@ type Chat struct {
 // MessageEntity marks a span of a message: a bot_command at offset 0 is what
 // makes a text a command for every Bot API library.
 type MessageEntity struct {
-	Type   string `json:"type"`
-	Offset int    `json:"offset"`
-	Length int    `json:"length"`
+	Type          string `json:"type"`
+	Offset        int    `json:"offset"`
+	Length        int    `json:"length"`
+	URL           string `json:"url,omitempty"`
+	User          *User  `json:"user,omitempty"`
+	CustomEmojiID string `json:"custom_emoji_id,omitempty"`
 }
 
 // InlineKeyboardButton is one button of an inline keyboard: exactly one of
@@ -260,12 +263,13 @@ type PreCheckoutQuery struct {
 
 // MessageOrigin describes the original sender of a forwarded message.
 type MessageOrigin struct {
-	Type       string `json:"type"`
-	Date       int64  `json:"date"`
-	SenderUser *User  `json:"sender_user,omitempty"`
-	SenderChat *Chat  `json:"sender_chat,omitempty"`
-	Chat       *Chat  `json:"chat,omitempty"`
-	MessageID  int    `json:"message_id,omitempty"`
+	Type           string `json:"type"`
+	Date           int64  `json:"date"`
+	SenderUser     *User  `json:"sender_user,omitempty"`
+	SenderChat     *Chat  `json:"sender_chat,omitempty"`
+	Chat           *Chat  `json:"chat,omitempty"`
+	MessageID      int    `json:"message_id,omitempty"`
+	SenderUserName string `json:"sender_user_name,omitempty"`
 }
 
 // Message mirrors the subset of the Bot API Message object a bot reads
