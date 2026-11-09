@@ -58,6 +58,9 @@ type Options struct {
 	// AllowHTTPWebhook permits non-loopback HTTP webhook URLs on any port
 	// for container test networks. False preserves Telegram's URL checks.
 	AllowHTTPWebhook bool
+	// Now supplies the server clock. Nil uses time.Now. Tests may provide a
+	// deterministic clock and advance it through the simulation API.
+	Now func() time.Time
 }
 
 // The bot a Server with no options plays.
@@ -74,12 +77,15 @@ const (
 
 // Call is one Bot API request the fake answered, kept in the outbox.
 type Call struct {
-	Seq      int               `json:"seq"`
-	At       time.Time         `json:"at"`
-	Method   string            `json:"method"`
-	Params   map[string]string `json:"params"`
-	Status   int               `json:"status"`
-	Response json.RawMessage   `json:"response"`
+	Fault        *Fault            `json:"fault,omitempty"`
+	Applied      bool              `json:"applied"`
+	ResponseSent bool              `json:"response_sent"`
+	Seq          int               `json:"seq"`
+	At           time.Time         `json:"at"`
+	Method       string            `json:"method"`
+	Params       map[string]string `json:"params"`
+	Status       int               `json:"status"`
+	Response     json.RawMessage   `json:"response"`
 }
 
 // storedFile is incoming or outgoing media retained by the stand.
@@ -122,6 +128,9 @@ type Server struct {
 	files           map[string]*storedFile
 	nextFileID      int
 	now             func() time.Time
+	clockMu         sync.Mutex
+	clockBase       func() time.Time
+	clockOffset     time.Duration
 
 	// token is the one in the path of the latest Bot API call: what launch
 	// data is signed with when Options.Token is not set.
@@ -134,6 +143,8 @@ type Server struct {
 	inlineMessages  map[string]*storedMessage
 	prepared        map[string]preparedMessage
 	profiles        map[int64]botapi.UserProfilePhotos
+	joinRequests    map[int64]map[int64]*botapi.ChatJoinRequest
+	migrations      map[int64]int64
 	nextInline      int
 	nextAlbum       int
 	sharedWidgets   map[string]*sharedWidget
@@ -163,6 +174,10 @@ func New(opts Options) *Server {
 	if opts.HTTPClient == nil {
 		opts.HTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
+	clockBase := opts.Now
+	if clockBase == nil {
+		clockBase = time.Now
+	}
 	s := &Server{
 		opts:           opts,
 		nextUpdate:     1,
@@ -174,7 +189,7 @@ func New(opts Options) *Server {
 		cbqChat:        map[string]int64{},
 		preCheckouts:   map[string]*preCheckout{},
 		files:          map[string]*storedFile{},
-		now:            time.Now,
+		clockBase:      clockBase,
 		chatMenus:      map[int64]*botapi.MenuButton{},
 		webQueries:     map[string]webQuery{},
 		inlineQueries:  map[string]*inlineQueryState{},
@@ -184,6 +199,13 @@ func New(opts Options) *Server {
 		profiles:       map[int64]botapi.UserProfilePhotos{},
 		sharedWidgets:  map[string]*sharedWidget{},
 		widgetQueries:  map[string]*widgetAnswer{},
+		joinRequests:   map[int64]map[int64]*botapi.ChatJoinRequest{},
+		migrations:     map[int64]int64{},
+	}
+	s.now = func() time.Time {
+		s.clockMu.Lock()
+		defer s.clockMu.Unlock()
+		return s.clockBase().Add(s.clockOffset)
 	}
 	s.networkCtx, s.stopNetwork = context.WithCancel(context.Background())
 	go s.deliverWebhooks()
@@ -249,6 +271,8 @@ func (s *Server) Reset() {
 	s.profiles = map[int64]botapi.UserProfilePhotos{}
 	s.sharedWidgets = map[string]*sharedWidget{}
 	s.widgetQueries = map[string]*widgetAnswer{}
+	s.joinRequests = map[int64]map[int64]*botapi.ChatJoinRequest{}
+	s.migrations = map[int64]int64{}
 	s.wakeLocked()
 }
 
@@ -293,6 +317,13 @@ func (s *Server) Calls(method string) []Call {
 	out := make([]Call, 0, len(s.calls))
 	for _, c := range s.calls {
 		if method == "" || strings.EqualFold(c.Method, method) {
+			c.Fault = copyPointer(c.Fault)
+			c.Response = append(json.RawMessage(nil), c.Response...)
+			params := make(map[string]string, len(c.Params))
+			for k, v := range c.Params {
+				params[k] = v
+			}
+			c.Params = params
 			out = append(out, c)
 		}
 	}
@@ -321,12 +352,14 @@ func (s *Server) recordLocked(method string, params url.Values, status int, body
 		flat[k] = params.Get(k)
 	}
 	s.calls = append(s.calls, Call{
-		Seq:      len(s.calls) + 1,
-		At:       s.now(),
-		Method:   method,
-		Params:   flat,
-		Status:   status,
-		Response: json.RawMessage(append([]byte(nil), body...)),
+		Applied:      status >= 200 && status < 300,
+		ResponseSent: true,
+		Seq:          len(s.calls) + 1,
+		At:           s.now(),
+		Method:       method,
+		Params:       flat,
+		Status:       status,
+		Response:     json.RawMessage(append([]byte(nil), body...)),
 	})
 	if s.opts.Logf != nil {
 		s.opts.Logf("%s %d %s", method, status, summarizeParams(flat))

@@ -3,7 +3,7 @@
 **tgfake server** is a fake Telegram Bot API for testing bots offline. It
 answers the Bot API methods a bot calls, keeps the chats the bot writes to,
 and lets a test, a CI job or a person at a browser play the user: send
-messages, tap inline buttons, open Mini Apps, and make Telegram fail on
+messages, tap reply and inline buttons, open Mini Apps, and make Telegram fail on
 purpose. No token, no phone, no network.
 
 ![The chat page: the person's side of the conversation on the left, the bot's keyboard as buttons, every Bot API call the bot made on the right](docs/assets/chat-page.png)
@@ -25,7 +25,8 @@ purpose. No token, no phone, no network.
 - **The person's side, scriptable.** A [simulation API](docs/sim-api.md)
   under `/sim/` injects text, media, inline queries, Mini App data and taps,
   selects inline results, configures chats and members, returns the transcript and every
-  Bot API call, schedules faults such as a 429 flood or an outage, and opens
+  Bot API call, schedules chat-scoped HTTP errors, delays and lost responses for the Bot API
+  and file downloads, and opens
   Mini Apps with launch data signed by the bot's token.
 - **A chat page.** `http://127.0.0.1:18790/` is a Telegram client for the
   bot: type messages, tap buttons, open Mini Apps in a phone frame, run HTML
@@ -35,7 +36,10 @@ purpose. No token, no phone, no network.
   phone-sized screen, so a site can be checked at the width a Telegram user sees it.
 - **A scripted model.** `--llm` also serves an OpenAI-compatible
   `/v1/chat/completions` that answers by rule, in turn or by echo, streams
-  word by word and can call a tool, so an LLM bot runs with no key.
+  word by word and can call tools, so an LLM bot runs with no key. Named
+  sequences isolate clients, match model/system/tools, and script provider
+  errors and timeout recovery with a request journal. The self-contained
+  [dialog bot example](examples/dialogbot) exercises a guarded tool dialog.
 - **Local Telegram Serverless.** `--serverless <project>` runs `tgcloud/`
   JavaScript handlers and authenticated Mini App endpoints in Docker, with
   the platform SDK and a shared SQLite database. Node.js stays in the
@@ -62,7 +66,7 @@ go install github.com/EvilFreelancer/tgfake/cmd/tgfake@latest
 In GitHub Actions, the [action](docs/ci.md) installs it and can start it:
 
 ```yaml
-- uses: EvilFreelancer/tgfake@v1.3.1   # installs the v1.3.1 binary
+- uses: EvilFreelancer/tgfake@v1.4.0   # installs the v1.4.0 binary
   with:
     start: "true"
     args: --llm
@@ -73,7 +77,7 @@ arm64. It runs as a non-root user and listens on `0.0.0.0:18790`; flags
 after the image name are added to that:
 
 ```bash
-docker run --rm -p 127.0.0.1:18790:18790 ghcr.io/evilfreelancer/tgfake:1.3.1 --llm
+docker run --rm -p 127.0.0.1:18790:18790 ghcr.io/evilfreelancer/tgfake:1.4.0 --llm
 ```
 
 ## Quick start
@@ -85,7 +89,7 @@ tgfake --llm
 ```
 
 ```text
-tgfake v1.3.1: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
+tgfake v1.4.0: fake Bot API for @tgfake_bot at http://127.0.0.1:18790
   Bot API:    http://127.0.0.1:18790/bot<token>/<method>  (in place of https://api.telegram.org)
   chat page:  http://127.0.0.1:18790/
   sim API:    http://127.0.0.1:18790/sim/
@@ -147,6 +151,18 @@ fmt.Print(fake.Chat(4242).Text()) // [1] alice: hello / [2] bot: ...
 
 [`examples/echobot`](examples/echobot) is a bot written with the standard
 library and its tests; [docs/go.md](docs/go.md) covers the whole Go API.
+
+**Moderation and lifecycle tests.** The Bot API surface includes
+`restrictChatMember`, `banChatMember`, `unbanChatMember`,
+`promoteChatMember`, `setChatPermissions`,
+`setChatAdministratorCustomTitle`, `approveChatJoinRequest` and
+`declineChatJoinRequest`. The simulation side adds `POST /sim/member`,
+`/sim/join-request`, `/sim/message/edit`, `/sim/reaction` and
+`/sim/chat/migrate`; `GET /sim/clock`, `POST /sim/clock/advance` and
+`POST /sim/clock/set` make dates and expiry deterministic. `/sim/message`
+also accepts sender chats, forward origins, arbitrary entities, stickers and
+forum-topic fields. See [the Bot API](docs/bot-api.md) and
+[simulation API](docs/sim-api.md) references for payloads and enforcement.
 
 **CI.** The action installs a release on Linux, macOS and Windows runners and
 can start it in the background; [docs/ci.md](docs/ci.md) has workflows for

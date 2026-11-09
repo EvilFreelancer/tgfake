@@ -11,5 +11,6 @@ type apiResponse struct {
 
 // responseParams carries retry_after on a 429.
 type responseParams struct {
-	RetryAfter int `json:"retry_after,omitempty"`
+	RetryAfter      int   `json:"retry_after,omitempty"`
+	MigrateToChatID int64 `json:"migrate_to_chat_id,omitempty"`
 }

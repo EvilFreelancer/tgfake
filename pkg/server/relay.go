@@ -73,7 +73,7 @@ func (s *Server) deleteMessages(w http.ResponseWriter, method string, params url
 	}
 	for _, id := range ids {
 		if message := chat.byID[id]; message != nil {
-			message.deleted = true
+			chat.deleteLocked(message)
 		}
 	}
 	s.mu.Unlock()
@@ -132,8 +132,12 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 			problem = "Bad Request: message can't be forwarded"
 			break
 		}
+		if !forward && message.msg.HasProtectedContent {
+			problem = "Bad Request: message can't be copied"
+			break
+		}
 		if !forward && ((!bulk && message.msg.Invoice != nil) || message.msg.Widget != nil) {
-			// Invoices and widgets can be forwarded, not copied.
+			// An invoice can be forwarded, not copied. A widget cannot be copied.
 			problem = "Bad Request: the message can't be copied"
 			break
 		}
@@ -185,6 +189,9 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 			}
 		}
 		stored := chat.appendLocked(copy, true, original.parseMode, original.rich)
+		if !bulk && !forward {
+			chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
+		}
 		stored.file = original.file
 		stored.widgetAllowQueries = original.widgetAllowQueries
 		stored.widgetForward = original.widgetForward || (forward && copy.Widget != nil)
@@ -261,6 +268,7 @@ func (s *Server) sendContent(w http.ResponseWriter, method string, params url.Va
 	message.From, message.Chat, message.Date, message.ReplyToMessage, message.ReplyMarkup = s.botUser(), chat.wire(), s.now().Unix(), quoted, markup
 	message.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(message, true, "", false)
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)

@@ -25,7 +25,15 @@ type IncomingMessage struct {
 	ReplyToMessageID int `json:"reply_to_message_id,omitempty"`
 	// Mention prefixes the text with the bot's @username, which is how a
 	// group message addresses the bot.
-	Mention bool `json:"mention,omitempty"`
+	Mention             bool                   `json:"mention,omitempty"`
+	SenderChat          *botapi.Chat           `json:"sender_chat,omitempty"`
+	IsAutomaticForward  bool                   `json:"is_automatic_forward,omitempty"`
+	ForwardOrigin       *botapi.MessageOrigin  `json:"forward_origin,omitempty"`
+	Entities            []botapi.MessageEntity `json:"entities,omitempty"`
+	HasProtectedContent bool                   `json:"has_protected_content,omitempty"`
+	Sticker             *botapi.Sticker        `json:"sticker,omitempty"`
+	MessageThreadID     int                    `json:"message_thread_id,omitempty"`
+	IsTopicMessage      bool                   `json:"is_topic_message,omitempty"`
 }
 
 // IncomingCallback is a tap on an inline keyboard button. The button is
@@ -87,9 +95,49 @@ func (in *IncomingMessage) normalize() {
 // becomes the next update. It returns the update id and the message id.
 func (s *Server) InjectMessage(in IncomingMessage) (updateID, messageID int) {
 	in.normalize()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.injectMessageLocked(in)
+}
+
+// incomingMessageProblem enforces membership for the simulation HTTP API.
+// Direct InjectMessage remains a low-level fixture helper for Go tests.
+func (s *Server) incomingMessageProblem(in IncomingMessage) string {
+	in.normalize()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat := s.chats[in.ChatID]
+	if chat == nil {
+		return ""
+	}
+	expireMemberLocked(chat, in.UserID, s.now())
+	member := chat.members[in.UserID]
+	if member == nil {
+		return ""
+	}
+	switch member["status"] {
+	case "left", "kicked":
+		return "sender is not a member of the chat"
+	case "restricted":
+		if member["is_member"] == false {
+			return "sender is not a member of the chat"
+		}
+		if member["can_send_messages"] != true {
+			return "sender is restricted from sending messages"
+		}
+	}
+	return ""
+}
+
+func (s *Server) injectMessageLocked(in IncomingMessage) (updateID, messageID int) {
 	from := &botapi.User{ID: in.UserID, FirstName: in.FirstName, Username: in.Username}
+	if in.SenderChat != nil && in.SenderChat.ID == in.ChatID {
+		from = &botapi.User{ID: 1087968824, IsBot: true, FirstName: "Group", Username: "GroupAnonymousBot"}
+	} else if in.SenderChat != nil {
+		from = nil
+	}
 	text := in.Text
-	var entities []botapi.MessageEntity
+	entities := append([]botapi.MessageEntity(nil), in.Entities...)
 	if in.Mention {
 		mention := "@" + s.opts.BotUsername
 		text = mention + " " + text
@@ -99,20 +147,28 @@ func (s *Server) InjectMessage(in IncomingMessage) (updateID, messageID int) {
 		entities = append(entities, botapi.MessageEntity{Type: "bot_command", Offset: 0, Length: utf16Len(m)})
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	chat := s.ensureChatLocked(in.ChatID, in.ChatType, in.ChatTitle, from)
 	msg := &botapi.Message{
-		From:     from,
-		Chat:     chat.wire(),
-		Date:     s.now().Unix(),
-		Text:     text,
-		Entities: entities,
+		From:                from,
+		Chat:                chat.wire(),
+		Date:                s.now().Unix(),
+		Text:                text,
+		Entities:            entities,
+		SenderChat:          in.SenderChat,
+		IsAutomaticForward:  in.IsAutomaticForward,
+		ForwardOrigin:       in.ForwardOrigin,
+		HasProtectedContent: in.HasProtectedContent,
+		Sticker:             in.Sticker,
+		MessageThreadID:     in.MessageThreadID,
+		IsTopicMessage:      in.IsTopicMessage,
 	}
 	if in.ReplyToMessageID != 0 {
 		if target := chat.byID[in.ReplyToMessageID]; target != nil {
 			msg.ReplyToMessage = target.quoted()
 		}
+	}
+	if chat.forceReply != nil && in.ReplyToMessageID == chat.forceReply.MessageID {
+		chat.forceReply = nil
 	}
 	stored := chat.appendLocked(msg, false, "", false)
 	upd := s.pushUpdateLocked(botapi.Update{Message: stored.clone()})
@@ -291,6 +347,16 @@ func updateKind(u botapi.Update) string {
 		return "pre_checkout_query"
 	case u.StoppedMessageGeneration != nil:
 		return "stopped_message_generation"
+	case u.MyChatMember != nil:
+		return "my_chat_member"
+	case u.ChatMember != nil:
+		return "chat_member"
+	case u.ChatJoinRequest != nil:
+		return "chat_join_request"
+	case u.MessageReaction != nil:
+		return "message_reaction"
+	case u.EditedMessage != nil:
+		return "edited_message"
 	default:
 		return "message"
 	}

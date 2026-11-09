@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/EvilFreelancer/tgfake/pkg/webapp"
 )
@@ -13,6 +14,7 @@ import (
 // chat would be. It injects what a user does and reads back what the bot did.
 //
 //	POST /sim/message           {chat_id, chat_type, user_id, username, text, reply_to_message_id, mention}
+//	POST /sim/keyboard/press    {chat_id, user_id, username, first_name, row, column}
 //	POST /sim/callback          {chat_id, user_id, message_id, data} or {chat_id, label}
 //	POST /sim/widget/query      {chat_id, user_id, message_id, data}
 //	GET  /sim/widget/answer?id=  whether the bot answered, and its data
@@ -25,12 +27,16 @@ import (
 //	GET  /sim/file/{id}
 //	GET  /sim/chats
 //	GET  /sim/state
+//	GET  /sim/clock
+//	POST /sim/clock/advance     {seconds}
+//	POST /sim/clock/set         {unix}
 //	POST /sim/webapp/launch     {chat_id, user_id, username, first_name, url, start_param, color_scheme, platform, version}
 //	GET  /sim/webapp/theme/{light|dark}
-//	POST /sim/fault             {method, code, description, retry_after, times} or {method, clear: true}
+//	POST /sim/fault             {method, code, description, retry_after, times, contains, chat_id, target, path, delay_ms, disconnect, after_apply} or {method | target, clear: true}
 //	DELETE /sim/fault
 //	POST /sim/reset
 func (s *Server) registerSim(mux *http.ServeMux) {
+	mux.HandleFunc("POST /sim/keyboard/press", s.simKeyboardPress)
 	mux.HandleFunc("POST /sim/message", s.simMessage)
 	mux.HandleFunc("POST /sim/callback", s.simCallback)
 	mux.HandleFunc("POST /sim/widget/query", s.simWidgetQuery)
@@ -44,6 +50,9 @@ func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sim/file/{id}", s.simFile)
 	mux.HandleFunc("GET /sim/chats", s.simChats)
 	mux.HandleFunc("GET /sim/state", s.simState)
+	mux.HandleFunc("GET /sim/clock", s.simClock)
+	mux.HandleFunc("POST /sim/clock/advance", s.simClockAdvance)
+	mux.HandleFunc("POST /sim/clock/set", s.simClockSet)
 	mux.HandleFunc("POST /sim/webapp/launch", s.simWebAppLaunch)
 	mux.HandleFunc("GET /sim/webapp/theme/{scheme}", s.simWebAppTheme)
 	mux.HandleFunc("POST /sim/fault", s.simFault)
@@ -57,6 +66,49 @@ func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sim/webapp/share", s.simSharePrepared)
 	mux.HandleFunc("POST /sim/media", s.simMedia)
 	mux.HandleFunc("POST /sim/user/profile", s.simUserProfile)
+	mux.HandleFunc("POST /sim/member", s.simMemberLifecycle)
+	mux.HandleFunc("POST /sim/join-request", s.simJoinRequest)
+	mux.HandleFunc("POST /sim/message/edit", s.simEditIncomingMessage)
+	mux.HandleFunc("POST /sim/reaction", s.simMessageReaction)
+	mux.HandleFunc("POST /sim/chat/migrate", s.simMigrateChat)
+}
+
+func (s *Server) simClock(w http.ResponseWriter, _ *http.Request) {
+	writeClock(w, s.now())
+}
+
+func (s *Server) simClockAdvance(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Seconds int64 `json:"seconds"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	s.clockMu.Lock()
+	s.clockOffset += time.Duration(in.Seconds) * time.Second
+	base := s.clockBase()
+	now := base.Add(s.clockOffset)
+	s.clockMu.Unlock()
+	writeClock(w, now)
+}
+
+func (s *Server) simClockSet(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Unix int64 `json:"unix"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	s.clockMu.Lock()
+	base := s.clockBase()
+	s.clockOffset = time.Unix(in.Unix, 0).Sub(base)
+	now := base.Add(s.clockOffset)
+	s.clockMu.Unlock()
+	writeClock(w, now)
+}
+
+func writeClock(w http.ResponseWriter, now time.Time) {
+	writeJSON(w, http.StatusOK, map[string]any{"unix": now.Unix(), "time": now.Format(time.RFC3339Nano)})
 }
 
 func (s *Server) simMessage(w http.ResponseWriter, r *http.Request) {
@@ -64,8 +116,12 @@ func (s *Server) simMessage(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if strings.TrimSpace(in.Text) == "" {
+	if strings.TrimSpace(in.Text) == "" && in.Sticker == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "text is empty"})
+		return
+	}
+	if problem := s.incomingMessageProblem(in); problem != "" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": problem})
 		return
 	}
 	upd, msgID := s.InjectMessage(in)
@@ -239,8 +295,24 @@ func (s *Server) simFault(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
+	// A rule that could never fire would quietly become another one.
+	switch {
+	case in.Target != "" && in.Target != "file":
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "target is empty for Bot API methods or file for downloads"})
+		return
+	case in.Target == "file" && in.ChatID != 0:
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "a download names no chat, so chat_id cannot match it"})
+		return
+	case in.Target == "" && in.Path != "":
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path matches downloads only, with target file"})
+		return
+	}
 	if in.Clear {
-		s.ClearFault(in.Method)
+		method := in.Method
+		if in.Target == "file" {
+			method = "file:*"
+		}
+		s.ClearFault(method)
 	} else {
 		s.SetFault(in.Fault)
 	}

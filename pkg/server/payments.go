@@ -76,6 +76,12 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 	if problem == "" {
 		problem = invoiceKeyboardProblem(markup)
 	}
+	// An invoice takes no reply keyboard, removal or ForceReply: the markup
+	// is then not an inline keyboard with a Pay button, and api.telegram.org
+	// answers so.
+	if keyboard, remove, force := replyControls(params.Get("reply_markup")); problem == "" && (keyboard != nil || remove != nil || force != nil) {
+		problem = "Bad Request: REPLY_MARKUP_BUY_EMPTY"
+	}
 	if problem != "" {
 		s.writeError(w, method, params, 400, problem, 0)
 		return
@@ -91,6 +97,9 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 	var total int64
 	for _, p := range prices {
 		total += p.Amount
+	}
+	if markup == nil {
+		markup = &botapi.InlineKeyboardMarkup{InlineKeyboard: [][]botapi.InlineKeyboardButton{{{Text: payLabel(params.Get("currency"), total), Pay: true}}}}
 	}
 	msg := &botapi.Message{
 		From:           s.botUser(),
@@ -112,6 +121,38 @@ func (s *Server) sendInvoice(w http.ResponseWriter, method string, params url.Va
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)
+}
+
+// payLabel is the text of the Pay button Telegram puts on an invoice sent
+// without a keyboard. Telegram writes it in a language of its choosing (seen
+// live as "Заплатить ⭐️1"); the stand writes English: "Pay ⭐️150" for Stars,
+// otherwise the total scaled by the currency's exponent and its code, "Pay
+// 1.50 USD". A bot finds the button by its pay field, not by this text.
+func payLabel(currency string, total int64) string {
+	if currency == xtrCurrency {
+		return "Pay ⭐️" + strconv.FormatInt(total, 10)
+	}
+	exp := currencyExponent(currency)
+	amount := strconv.FormatInt(total, 10)
+	if exp > 0 {
+		amount = fmt.Sprintf("%0*d", exp+1, total)
+		amount = amount[:len(amount)-exp] + "." + amount[len(amount)-exp:]
+	}
+	return "Pay " + amount + " " + currency
+}
+
+// currencyExponent is the number of digits after the point in a currency's
+// amounts, from Telegram's currencies.json
+// (https://core.telegram.org/bots/payments/currencies.json): 2 for all but
+// these few.
+func currencyExponent(currency string) int {
+	switch currency {
+	case "CLP", "ISK", "JPY", "KRW", "PYG", "UGX", "VND":
+		return 0
+	case "BHD", "IQD", "JOD":
+		return 3
+	}
+	return 2
 }
 
 // invoiceRequired are the parameters of sendInvoice the Bot API server

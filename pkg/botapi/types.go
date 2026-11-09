@@ -27,9 +27,13 @@ type Chat struct {
 // MessageEntity marks a span of a message: a bot_command at offset 0 is what
 // makes a text a command for every Bot API library.
 type MessageEntity struct {
-	Type   string `json:"type"`
-	Offset int    `json:"offset"`
-	Length int    `json:"length"`
+	Type          string `json:"type"`
+	Offset        int    `json:"offset"`
+	Length        int    `json:"length"`
+	URL           string `json:"url,omitempty"`
+	Language      string `json:"language,omitempty"`
+	User          *User  `json:"user,omitempty"`
+	CustomEmojiID string `json:"custom_emoji_id,omitempty"`
 }
 
 // InlineKeyboardButton is one button of an inline keyboard: exactly one of
@@ -129,6 +133,17 @@ type VideoNote struct {
 	Length       int    `json:"length"`
 	Duration     int    `json:"duration"`
 	FileSize     int    `json:"file_size,omitempty"`
+}
+
+type Sticker struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	Type         string `json:"type"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	IsAnimated   bool   `json:"is_animated"`
+	IsVideo      bool   `json:"is_video"`
+	Emoji        string `json:"emoji,omitempty"`
 }
 
 // Location is a point on the map.
@@ -260,12 +275,13 @@ type PreCheckoutQuery struct {
 
 // MessageOrigin describes the original sender of a forwarded message.
 type MessageOrigin struct {
-	Type       string `json:"type"`
-	Date       int64  `json:"date"`
-	SenderUser *User  `json:"sender_user,omitempty"`
-	SenderChat *Chat  `json:"sender_chat,omitempty"`
-	Chat       *Chat  `json:"chat,omitempty"`
-	MessageID  int    `json:"message_id,omitempty"`
+	Type           string `json:"type"`
+	Date           int64  `json:"date"`
+	SenderUser     *User  `json:"sender_user,omitempty"`
+	SenderChat     *Chat  `json:"sender_chat,omitempty"`
+	Chat           *Chat  `json:"chat,omitempty"`
+	MessageID      int    `json:"message_id,omitempty"`
+	SenderUserName string `json:"sender_user_name,omitempty"`
 }
 
 // Widget is an HTML widget carried by a message. ID is present only for a
@@ -314,8 +330,11 @@ type SharedWidgetQuery struct {
 type Message struct {
 	MessageID             int                   `json:"message_id"`
 	From                  *User                 `json:"from,omitempty"`
+	SenderChat            *Chat                 `json:"sender_chat,omitempty"`
 	Chat                  Chat                  `json:"chat"`
 	Date                  int64                 `json:"date"`
+	MessageThreadID       int                   `json:"message_thread_id,omitempty"`
+	IsTopicMessage        bool                  `json:"is_topic_message,omitempty"`
 	EditDate              int64                 `json:"edit_date,omitempty"`
 	Text                  string                `json:"text,omitempty"`
 	Caption               string                `json:"caption,omitempty"`
@@ -327,6 +346,7 @@ type Message struct {
 	Voice                 *Audio                `json:"voice,omitempty"`
 	VideoNote             *VideoNote            `json:"video_note,omitempty"`
 	Widget                *Widget               `json:"widget,omitempty"`
+	Sticker               *Sticker              `json:"sticker,omitempty"`
 	Location              *Location             `json:"location,omitempty"`
 	Contact               *Contact              `json:"contact,omitempty"`
 	Venue                 *Venue                `json:"venue,omitempty"`
@@ -338,11 +358,44 @@ type Message struct {
 	ForwardOrigin         *MessageOrigin        `json:"forward_origin,omitempty"`
 	ViaBot                *User                 `json:"via_bot,omitempty"`
 	HasProtectedContent   bool                  `json:"has_protected_content,omitempty"`
+	IsAutomaticForward    bool                  `json:"is_automatic_forward,omitempty"`
 	ShowCaptionAboveMedia bool                  `json:"show_caption_above_media,omitempty"`
 	Entities              []MessageEntity       `json:"entities,omitempty"`
 	CaptionEntities       []MessageEntity       `json:"caption_entities,omitempty"`
 	ReplyToMessage        *Message              `json:"reply_to_message,omitempty"`
 	ReplyMarkup           *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	NewChatMembers        []User                `json:"new_chat_members,omitempty"`
+	LeftChatMember        *User                 `json:"left_chat_member,omitempty"`
+	MigrateToChatID       int64                 `json:"migrate_to_chat_id,omitempty"`
+	MigrateFromChatID     int64                 `json:"migrate_from_chat_id,omitempty"`
+}
+
+type ChatMemberUpdated struct {
+	Chat          Chat           `json:"chat"`
+	From          User           `json:"from"`
+	Date          int64          `json:"date"`
+	OldChatMember ChatMember     `json:"old_chat_member"`
+	NewChatMember ChatMember     `json:"new_chat_member"`
+	InviteLink    map[string]any `json:"invite_link,omitempty"`
+}
+
+type ChatJoinRequest struct {
+	Chat       Chat           `json:"chat"`
+	From       User           `json:"from"`
+	UserChatID int64          `json:"user_chat_id"`
+	Date       int64          `json:"date"`
+	Bio        string         `json:"bio,omitempty"`
+	InviteLink map[string]any `json:"invite_link,omitempty"`
+}
+
+type MessageReactionUpdated struct {
+	Chat        Chat             `json:"chat"`
+	MessageID   int              `json:"message_id"`
+	User        *User            `json:"user,omitempty"`
+	ActorChat   *Chat            `json:"actor_chat,omitempty"`
+	Date        int64            `json:"date"`
+	OldReaction []map[string]any `json:"old_reaction"`
+	NewReaction []map[string]any `json:"new_reaction"`
 }
 
 // CallbackQuery is what a tap on an inline button delivers.
@@ -369,6 +422,7 @@ type MessageGenerationStopped struct {
 type Update struct {
 	UpdateID                 int                       `json:"update_id"`
 	Message                  *Message                  `json:"message,omitempty"`
+	EditedMessage            *Message                  `json:"edited_message,omitempty"`
 	CallbackQuery            *CallbackQuery            `json:"callback_query,omitempty"`
 	WidgetQuery              *WidgetQuery              `json:"widget_query,omitempty"`
 	SharedWidgetQuery        *SharedWidgetQuery        `json:"shared_widget_query,omitempty"`
@@ -376,6 +430,10 @@ type Update struct {
 	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation,omitempty"`
 	InlineQuery              *InlineQuery              `json:"inline_query,omitempty"`
 	ChosenInlineResult       *ChosenInlineResult       `json:"chosen_inline_result,omitempty"`
+	ChatMember               *ChatMemberUpdated        `json:"chat_member,omitempty"`
+	MyChatMember             *ChatMemberUpdated        `json:"my_chat_member,omitempty"`
+	ChatJoinRequest          *ChatJoinRequest          `json:"chat_join_request,omitempty"`
+	MessageReaction          *MessageReactionUpdated   `json:"message_reaction,omitempty"`
 }
 
 // BotCommand is one entry of setMyCommands.

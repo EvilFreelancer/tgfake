@@ -8,8 +8,11 @@ import (
 	"image"
 	"image/png"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/EvilFreelancer/tgfake/pkg/botapi"
 )
 
 // pngHeader is a PNG of a few dozen bytes that declares a w x h picture: the
@@ -186,5 +189,70 @@ func TestSimMediaCarriesTheAlbumAndTheType(t *testing.T) {
 	}
 	if view := s.fake.Chat(4242); view.Messages[0].MediaGroupID != "g1" {
 		t.Errorf("chat view media group = %q", view.Messages[0].MediaGroupID)
+	}
+}
+
+func TestSimMediaCarriesCaptionEntitiesForwardOriginAndProtection(t *testing.T) {
+	s := newStand(t, Options{})
+	origin := map[string]any{
+		"type": "channel", "date": 4,
+		"chat":       map[string]any{"id": -20, "type": "channel", "title": "Source"},
+		"message_id": 9,
+	}
+	entities := []map[string]any{
+		{"type": "bold", "offset": 0, "length": 4},
+		{"type": "text_link", "offset": 5, "length": 4, "url": "https://example.test"},
+	}
+	for index := 0; index < 2; index++ {
+		status, body := s.sim("POST", "/sim/media", map[string]any{
+			"type": "audio", "data": base64.StdEncoding.EncodeToString([]byte("audio")),
+			"caption": "bold link", "caption_entities": entities,
+			"media_group_id": "forwarded-album", "forward_origin": origin,
+			"has_protected_content": index == 1,
+		})
+		if status != http.StatusOK {
+			t.Fatalf("media %d: %d %v", index, status, body)
+		}
+		message := s.pollMessage()
+		if message["caption"] != "bold link" || len(message["caption_entities"].([]any)) != 2 {
+			t.Fatalf("caption entities = %v", message)
+		}
+		if message["forward_origin"].(map[string]any)["type"] != "channel" || message["media_group_id"] != "forwarded-album" {
+			t.Fatalf("forwarded album = %v", message)
+		}
+		if index == 1 && message["has_protected_content"] != true {
+			t.Fatalf("protected media = %v", message)
+		}
+	}
+	view := s.fake.Chat(4242)
+	if len(view.Messages[0].CaptionEntities) != 2 || view.Messages[0].ForwardOrigin == nil || !view.Messages[1].HasProtectedContent {
+		t.Fatalf("chat view = %#v", view.Messages)
+	}
+}
+
+func TestMediaCaptionEntitiesAndOriginSurviveCopyAndForward(t *testing.T) {
+	s := newStand(t, Options{})
+	origin := &botapi.MessageOrigin{Type: "channel", Date: 4, Chat: &botapi.Chat{ID: -20, Type: "channel", Title: "Source"}, MessageID: 9}
+	entities := []botapi.MessageEntity{{Type: "spoiler", Offset: 0, Length: 6}}
+	_, _, err := s.fake.InjectMedia(IncomingMedia{
+		Type: "audio", Data: []byte("audio"), Caption: "secret",
+		CaptionEntities: entities,
+		IncomingMessage: IncomingMessage{ForwardOrigin: origin},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"copyMessage", "forwardMessage"} {
+		status, body := s.call(method, url.Values{"chat_id": {"2"}, "from_chat_id": {"4242"}, "message_id": {"1"}})
+		if status != http.StatusOK {
+			t.Fatalf("%s: %d %v", method, status, body)
+		}
+	}
+	view := s.fake.Chat(2)
+	if len(view.Messages) != 2 || len(view.Messages[0].CaptionEntities) != 1 || len(view.Messages[1].CaptionEntities) != 1 {
+		t.Fatalf("relayed entities = %#v", view.Messages)
+	}
+	if view.Messages[0].ForwardOrigin != nil || view.Messages[1].ForwardOrigin == nil || view.Messages[1].ForwardOrigin.Type != "channel" {
+		t.Fatalf("relayed origins = %#v", view.Messages)
 	}
 }

@@ -12,23 +12,30 @@ import (
 // message in order, the drafts being streamed and what the bot did around
 // them.
 type chatState struct {
-	id        int64
-	typ       string
-	title     string
-	user      *botapi.User // the person on the other side of a private chat
-	nextMsgID int
-	messages  []*storedMessage
-	byID      map[int]*storedMessage
-	drafts    map[int64]*draft
-	lastTyped time.Time
-	callbacks []CallbackAnswer
-	info      map[string]any
-	members   map[int64]map[string]any
+	replyKeyboard  *botapi.ReplyKeyboardMarkup
+	keyboardHidden bool
+	keyboardMsgID  int // the message that installed replyKeyboard
+	forceReply     *ForceReplyView
+	id             int64
+	typ            string
+	title          string
+	user           *botapi.User // the person on the other side of a private chat
+	nextMsgID      int
+	messages       []*storedMessage
+	byID           map[int]*storedMessage
+	drafts         map[int64]*draft
+	lastTyped      time.Time
+	callbacks      []CallbackAnswer
+	info           map[string]any
+	members        map[int64]map[string]any
 }
 
 // storedMessage is a message plus what the transcript view wants to know
 // about it.
 type storedMessage struct {
+	replyKeyboard      *botapi.ReplyKeyboardMarkup
+	removeKeyboard     *botapi.ReplyKeyboardRemove
+	forceReply         *ForceReplyView
 	msg                botapi.Message
 	fromBot            bool
 	parseMode          string
@@ -193,13 +200,16 @@ func (m *storedMessage) button(label string) *botapi.InlineKeyboardButton {
 
 // ChatView is a chat as the simulation API and the page show it.
 type ChatView struct {
-	ChatID    int64            `json:"chat_id"`
-	Type      string           `json:"type"`
-	Title     string           `json:"title,omitempty"`
-	Typing    bool             `json:"typing"`
-	Messages  []MessageView    `json:"messages"`
-	Drafts    []DraftView      `json:"drafts"`
-	Callbacks []CallbackAnswer `json:"callbacks"`
+	ReplyKeyboard  *botapi.ReplyKeyboardMarkup `json:"reply_keyboard,omitempty"`
+	KeyboardHidden bool                        `json:"keyboard_hidden,omitempty"`
+	ForceReply     *ForceReplyView             `json:"force_reply,omitempty"`
+	ChatID         int64                       `json:"chat_id"`
+	Type           string                      `json:"type"`
+	Title          string                      `json:"title,omitempty"`
+	Typing         bool                        `json:"typing"`
+	Messages       []MessageView               `json:"messages"`
+	Drafts         []DraftView                 `json:"drafts"`
+	Callbacks      []CallbackAnswer            `json:"callbacks"`
 	// MenuButton is the menu button the chat shows: its own, else the bot's.
 	MenuButton *botapi.MenuButton `json:"menu_button,omitempty"`
 }
@@ -228,11 +238,16 @@ func (v ChatView) FindButton(label string) (messageID int, data string, ok bool)
 
 // MessageView is one message of a ChatView.
 type MessageView struct {
+	ReplyKeyboard         *botapi.ReplyKeyboardMarkup     `json:"reply_keyboard,omitempty"`
+	RemoveKeyboard        *botapi.ReplyKeyboardRemove     `json:"remove_keyboard,omitempty"`
+	ForceReply            *ForceReplyView                 `json:"force_reply,omitempty"`
 	MessageID             int                             `json:"message_id"`
 	From                  string                          `json:"from"` // "bot" or "user"
 	Username              string                          `json:"username,omitempty"`
 	Text                  string                          `json:"text"`
 	Caption               string                          `json:"caption,omitempty"`
+	Entities              []botapi.MessageEntity          `json:"entities,omitempty"`
+	CaptionEntities       []botapi.MessageEntity          `json:"caption_entities,omitempty"`
 	Photo                 *FileView                       `json:"photo,omitempty"`
 	Document              *FileView                       `json:"document,omitempty"`
 	Video                 *FileView                       `json:"video,omitempty"`
@@ -253,6 +268,7 @@ type MessageView struct {
 	RefundedPayment       *botapi.RefundedPayment         `json:"refunded_payment,omitempty"`
 	MediaGroupID          string                          `json:"media_group_id,omitempty"`
 	ForwardOrigin         *botapi.MessageOrigin           `json:"forward_origin,omitempty"`
+	HasProtectedContent   bool                            `json:"has_protected_content,omitempty"`
 	ParseMode             string                          `json:"parse_mode,omitempty"`
 	ReplyToMessageID      int                             `json:"reply_to_message_id,omitempty"`
 	Edited                bool                            `json:"edited"`
@@ -318,20 +334,28 @@ func (s *Server) Chat(id int64) ChatView {
 func (c *chatState) view(now time.Time) ChatView {
 	c.expireDraftsLocked(now)
 	v := ChatView{
-		ChatID:    c.id,
-		Type:      c.typ,
-		Title:     c.title,
-		Typing:    !c.lastTyped.IsZero() && now.Sub(c.lastTyped) < typingWindow,
-		Messages:  make([]MessageView, 0, len(c.messages)),
-		Drafts:    make([]DraftView, 0, len(c.drafts)),
-		Callbacks: append([]CallbackAnswer{}, c.callbacks...),
+		ReplyKeyboard:  cloneReplyKeyboard(c.replyKeyboard),
+		KeyboardHidden: c.keyboardHidden,
+		ForceReply:     copyPointer(c.forceReply),
+		ChatID:         c.id,
+		Type:           c.typ,
+		Title:          c.title,
+		Typing:         !c.lastTyped.IsZero() && now.Sub(c.lastTyped) < typingWindow,
+		Messages:       make([]MessageView, 0, len(c.messages)),
+		Drafts:         make([]DraftView, 0, len(c.drafts)),
+		Callbacks:      append([]CallbackAnswer{}, c.callbacks...),
 	}
 	for _, m := range c.messages {
 		mv := MessageView{
+			ReplyKeyboard:         cloneReplyKeyboard(m.replyKeyboard),
+			RemoveKeyboard:        copyPointer(m.removeKeyboard),
+			ForceReply:            copyPointer(m.forceReply),
 			MessageID:             m.msg.MessageID,
 			From:                  "user",
 			Text:                  m.msg.Text,
 			Caption:               m.msg.Caption,
+			Entities:              append([]botapi.MessageEntity(nil), m.msg.Entities...),
+			CaptionEntities:       append([]botapi.MessageEntity(nil), m.msg.CaptionEntities...),
 			ParseMode:             m.parseMode,
 			Edited:                m.edited,
 			Deleted:               m.deleted,
@@ -343,6 +367,7 @@ func (c *chatState) view(now time.Time) ChatView {
 		wire := m.clone()
 		mv.Widget = wire.Widget
 		mv.Location, mv.Contact, mv.Venue, mv.WebAppData, mv.MediaGroupID, mv.ForwardOrigin = wire.Location, wire.Contact, wire.Venue, wire.WebAppData, wire.MediaGroupID, wire.ForwardOrigin
+		mv.HasProtectedContent = wire.HasProtectedContent
 		mv.Invoice, mv.SuccessfulPayment, mv.RefundedPayment = wire.Invoice, wire.SuccessfulPayment, wire.RefundedPayment
 		if m.fromBot {
 			mv.From = "bot"
@@ -501,6 +526,18 @@ func (v ChatView) Text() string {
 			}
 			sb.WriteString("\n")
 		}
+	}
+	if v.ReplyKeyboard != nil {
+		sb.WriteString("reply keyboard:\n")
+		for _, row := range v.ReplyKeyboard.Keyboard {
+			for _, b := range row {
+				sb.WriteString(" [" + b.Text + "]")
+			}
+			sb.WriteString("\n")
+		}
+	}
+	if v.ForceReply != nil {
+		sb.WriteString("force reply to #" + itoa(v.ForceReply.MessageID) + "\n")
 	}
 	for _, d := range v.Drafts {
 		sb.WriteString("draft " + itoa(int(d.DraftID)) + " (rev " + itoa(d.Revisions) + "): " + strings.ReplaceAll(d.Markdown, "\n", "\n    ") + "\n")

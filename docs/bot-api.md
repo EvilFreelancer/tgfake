@@ -98,6 +98,13 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `getChatMember` | `chat_id`, `user_id` | A configured/inferred `ChatMember`; a known user outside the chat has status `left`. |
 | `getChatAdministrators` | `chat_id` | Every creator/administrator member, other bots included, ordered by user id. |
 | `getChatMemberCount` | `chat_id` | The number of present members. |
+| `restrictChatMember` | `chat_id`, `user_id`, `permissions`, `use_independent_chat_permissions`, `until_date` | `true`; stores a restricted member, or a member when every permission is true. |
+| `banChatMember` | `chat_id`, `user_id`, `until_date`, `revoke_messages` | `true`; stores the member as `kicked`. |
+| `unbanChatMember` | `chat_id`, `user_id`, `only_if_banned` | `true`; stores the member as `left` when applicable. |
+| `promoteChatMember` | `chat_id`, `user_id`, administrator `can_*` fields | `true`; stores an administrator, or demotes when every right is false. |
+| `setChatPermissions` | `chat_id`, `permissions`, `use_independent_chat_permissions` | `true`; replaces the default permissions returned by `getChat`. |
+| `setChatAdministratorCustomTitle` | `chat_id`, `user_id`, `custom_title` | `true`; changes the administrator member record. |
+| `approveChatJoinRequest`, `declineChatJoinRequest` | `chat_id`, `user_id` | `true`; consumes a pending simulated request. Approval adds the member. |
 | `getUserProfilePhotos` | `user_id`, `offset`, `limit` | Configured profile photos; a known user has an empty list by default. |
 
 Messages, updates, keyboards and the other objects have the shapes of the types in [`pkg/botapi`](../pkg/botapi/types.go).
@@ -113,7 +120,7 @@ The stand creates `message` (text, incoming media, `web_app_data` or a payment s
 | `timeout` | Seconds to hold the request open while nothing is pending. Missing or `0` answers at once. The wait is capped by `--poll-max` (`Options.MaxPollWait`), 30 s by default. A held request is answered as soon as an update is created, when the wait runs out, or when the server is closed; if the client goes away first, nothing is answered. |
 | `allowed_updates` | A JSON array of kinds. A list replaces the subscription, an empty list `[]` means every kind, and a missing parameter or the literal `null` keeps whatever the previous poll asked for. A value that is not a JSON array is refused with `Bad Request: can't parse allowed_updates JSON array`. |
 
-The subscription is remembered between polls, as Telegram remembers it for the token, and survives `POST /sim/reset`. It is applied when an update is created, not when it is delivered: an update of a kind the subscription excludes at that moment is never queued (its id is still used up), and an update already queued is delivered even if a later poll narrows the subscription. Updates stay pending until a later poll confirms them with its `offset`; a fault scheduled for `getUpdates` answers before the offset is applied, so a failed poll confirms nothing.
+The subscription is remembered between polls, as Telegram remembers it for the token, and survives `POST /sim/reset`. It is applied when an update is created, not when it is delivered: an update of a kind the subscription excludes at that moment is never queued (its id is still used up), and an update already queued is delivered even if a later poll narrows the subscription. Updates stay pending until a later poll confirms them with its `offset`; a fault scheduled for `getUpdates` answers before the offset is applied, so a failed poll confirms nothing, unless it is an `after_apply` fault: that poll confirms its offset and only its answer is lost ([sim-api.md](sim-api.md#addressed-network-faults)).
 
 A message the person sends gets a `bot_command` entity when its text starts with a command (`/start`, `/help@tgfake_bot`), and a `mention` entity when `mention` asked for the bot's `@username` in front of it. With `mention` the text starts with the mention, so it carries no `bot_command` entity. Entity offsets and lengths are counted in UTF-16 code units, as Telegram counts them.
 
@@ -125,11 +132,11 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Replies.** A send replies to a message named by `reply_parameters` (`{"message_id": N, "allow_sending_without_reply": true}`) or by the older `reply_to_message_id` with `allow_sending_without_reply=true`. The answer carries `reply_to_message`, the quoted message without its own quote. A reply to a message that is not in the chat, or was deleted, is refused unless `allow_sending_without_reply` is set, in which case the message goes out unthreaded.
 
-**Keyboards.** Only inline keyboards are kept. A `reply_markup` of another kind (a reply keyboard, `remove_keyboard`, `force_reply`), an empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat`, `copy_text` or `pay`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md). A `pay` button is the "Pay" button of an invoice: an invoice is sent with a keyboard that leads with one (`Bad Request: REPLY_MARKUP_BUY_EMPTY` when it has none, `Bad Request: BUTTON_POS_INVALID` when it has one elsewhere), while any other message, and any edit of a keyboard, an invoice's included, refuses one with `Bad Request: BUTTON_TYPE_INVALID`.
+**Keyboards.** An inline keyboard is kept on the message. A reply keyboard, `remove_keyboard` and `force_reply` change the chat instead, as [Reply keyboards and requested replies](#reply-keyboards-and-requested-replies) describes, and a message that carries one of them cannot be edited (`Bad Request: message can't be edited`), as in Telegram. An empty `inline_keyboard` array or a value that is not a JSON object is accepted and dropped. Text, media, contact/location and rich messages keep keyboards under the same rules. A button must have exactly one action: `callback_data`, `url`, `web_app`, `switch_inline_query`, `switch_inline_query_current_chat`, `copy_text` or `pay`. Switch buttons open inline search on the chat page; copy buttons use the browser clipboard. `web_app` buttons are covered in [mini-apps.md](mini-apps.md). A `pay` button is the "Pay" button of an invoice: an invoice is sent with a keyboard that leads with one (`Bad Request: REPLY_MARKUP_BUY_EMPTY` when it has none or the markup is a reply keyboard, `remove_keyboard` or `force_reply`, `Bad Request: BUTTON_POS_INVALID` when it has one elsewhere), while any other message, and any edit of a keyboard, an invoice's included, refuses one with `Bad Request: BUTTON_TYPE_INVALID`.
 
-**Edits.** The bot's own messages and messages sent via this bot can be edited. `editMessageText` replaces text and keyboard (omitted `reply_markup` removes it) and records `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. Caption/media edits use the same target and keyboard rules. An unchanged edit is refused. Keyboard equality includes every supported button action. Inline targets return `true`; ordinary targets return the edited message.
+**Edits.** The bot's own messages and messages sent via this bot can be edited, except one sent with a reply keyboard, `remove_keyboard` or `force_reply`. `editMessageText` replaces text and keyboard (omitted `reply_markup` removes it) and records `parse_mode`; `editMessageReplyMarkup` replaces the keyboard only. Caption/media edits use the same target and keyboard rules. An unchanged edit is refused. Keyboard equality includes every supported button action. Inline targets return `true`; ordinary targets return the edited message.
 
-**Deletes.** `deleteMessage` marks a message, the bot's or the person's, as deleted. The text transcript leaves it out, the JSON transcript shows it with `"deleted": true`, and it can no longer be edited, replied to or tapped.
+**Deletes.** `deleteMessage` marks a message, the bot's or the person's, as deleted. The text transcript leaves it out, the JSON transcript shows it with `"deleted": true`, and it can no longer be edited, replied to or tapped. Deleting the message that installed the chat's reply keyboard, or asked with `ForceReply`, also takes that control away.
 
 **Files and media.** A file parameter accepts a multipart upload, an `attach://part_name` reference, a known file id of the same type or an HTTP(S) URL (except video notes). File ids are `file_1`, `file_2` and so on, with `file_unique_id` `ufile_1` and so on. A photo must decode as PNG, JPEG or GIF and is described by one `PhotoSize` with its real dimensions. Other media bytes are opaque: MIME type is detected, while dimensions, duration, performer and title come from supplied metadata; no codec probing or transcoding occurs. Incoming media uses the same file store; an incoming photo larger than 90 pixels on its long side also gets a 90-pixel JPEG thumbnail, listed first among its sizes, and its caption carries `caption_entities` for a mention and a leading command. `getFile` supplies the authenticated download path, while `/sim/file/{file_id}` serves the bytes to tests and the chat page. A stored upload is recorded as `<file name> (<size> bytes)` in the outbox.
 
@@ -137,7 +144,11 @@ The bot's messages carry `from` as the bot's user. `parse_mode` is recorded and 
 
 **Webhooks.** Updates are delivered oldest first, one request at a time. A 2xx response confirms the update; failures retain it, update `last_error_date`/`last_error_message` and retry after one second. A JSON response containing `method` and parameters can call a Bot API method. Changing or deleting the webhook cancels an in-flight request without losing its queued update; `Close` cancels delivery and media URL downloads. Localhost/loopback HTTP URLs and arbitrary local ports are allowed so a test can run its receiver offline. Other URLs must be HTTPS on Telegram's allowed ports. For container test networks, `--allow-http-webhook` (`Options.AllowHTTPWebhook`) explicitly permits non-loopback HTTP URLs on any port, such as `http://bot:8080/webhook`. This exception is off by default; HTTPS URL and secret-token checks remain unchanged. Uploaded PEM certificates extend the client's trust roots. `max_connections` is reported but delivery stays serialized; `ip_address` is reported without overriding DNS.
 
-**Chat information.** A chat starts with the bot as a member; injected users become members unless a test configured their status. `/sim/chat/configure` supplies metadata and membership, including administrators, restricted and absent users. `/sim/user/profile` supplies photo sets using known photo ids. Configured information is copied and reset with the session; querying it never changes membership.
+**Chat information and moderation.** A chat starts with the bot as a member; injected users become members unless a test configured their status. `/sim/chat/configure` supplies metadata and membership, including administrators, restricted and absent users. Moderation methods mutate those same records, so `getChatMember`, `getChatAdministrators` and the member count immediately reflect them. Restriction and ban dates less than 30 seconds or more than 366 days ahead are stored as `0` (forever), matching Telegram. `/sim/user/profile` supplies photo sets using known photo ids. Configured information is copied and reset with the session.
+
+Restricted members and default chat permissions include the complete current permission set, including `can_edit_tag`; required boolean fields are emitted even when false so strict Bot API clients such as python-telegram-bot 22.x can construct every `ChatMember` variant.
+
+The bot must be an administrator with `can_restrict_members` for restrict, ban, unban and default permissions, or `can_promote_members` for promotion and custom titles. The stand refuses actions on itself, owners, and restriction/removal of administrators with Telegram's Bot API descriptions. Restriction, promotion, default permissions and custom titles are supergroup-only. Expired temporary restrictions become `member`; expired temporary bans become `left` when membership is next read or used.
 
 **Callback queries.** A tap through the simulation API mints a query id `cbq-1`, `cbq-2` and so on. A query takes one answer: once answered it is forgotten, so a second answer is refused like an unknown one, and so is an answer to a query minted before a reset. The answers are listed in the chat's `callbacks` with their `text` and `show_alert`.
 
@@ -165,7 +176,7 @@ A scope names its chat by integer id, given as a number or a string of digits, o
 
 ## Payments
 
-`sendInvoice` stores an invoice message. Its `total_amount` is the sum of the `prices`, the title is cut to 64 characters and the description to 255, as Telegram cuts them, and the `payload` is kept for the pre-checkout query and the payment service message: it is not part of the wire `Invoice` object, as on Telegram. An invoice can be forwarded but not copied, and its text cannot be edited.
+`sendInvoice` stores an invoice message. Its `total_amount` is the sum of the `prices`, the title is cut to 64 characters and the description to 255, as Telegram cuts them, and the `payload` is kept for the pre-checkout query and the payment service message: it is not part of the wire `Invoice` object, as on Telegram. An invoice can be forwarded but not copied, and its text cannot be edited. An invoice sent without a keyboard (or with an empty one) carries Telegram's own Pay button in `reply_markup`, as api.telegram.org returns it: `{"inline_keyboard":[[{"text":"Pay ⭐️150","pay":true}]]}`. Telegram writes that label in a language of its choosing (seen live as `Заплатить ⭐️1`); the stand writes English, `Pay ⭐️<total>` for Stars and otherwise `Pay <total> <currency>` with the total scaled by the currency's exponent from Telegram's [currencies.json](https://core.telegram.org/bots/payments/currencies.json), `Pay 1.50 USD`. Find the button by `pay`, not by its text.
 
 The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_checkout_query`. The query carries the currency, the total and the payload of the invoice itself, so a bot that re-checks the price against its own catalogue meets whatever the invoice said - including a price that has moved on since. The query takes exactly one answer: `answerPreCheckoutQuery` refuses the second one the way it refuses a query it never issued. Confirming one with `ok=true` appends a `successful_payment` service message to the chat and queues it, as Telegram does once the money is taken; refusing one takes no money and delivers nothing. `POST /sim/payment` delivers a payment service message of its own, for a charge taken elsewhere and for a `refunded_payment`. On the chat page an invoice shows its Pay button, Telegram's own when its keyboard has none, and a tap on it is `POST /sim/invoice/pay`.
 
@@ -258,7 +269,7 @@ The stand refuses what api.telegram.org refuses, with the HTTP status as `error_
 | same | `payload` is past 128 bytes | `Bad Request: INVOICE_PAYLOAD_INVALID` |
 | same | `currency` is not `XTR` and `provider_token` is empty | `Bad Request: PAYMENT_PROVIDER_INVALID` |
 | same | `currency` is `XTR` and `prices` does not hold exactly one item | `Bad Request: STARS_INVOICE_INVALID` |
-| same | a keyboard has no Pay button / has one, but not first in the first row | `Bad Request: REPLY_MARKUP_BUY_EMPTY` / `Bad Request: BUTTON_POS_INVALID` |
+| same | a keyboard has no Pay button, or the markup is a reply keyboard, `remove_keyboard` or `force_reply` (a reply keyboard beside a Pay button included) / has one, but not first in the first row | `Bad Request: REPLY_MARKUP_BUY_EMPTY` / `Bad Request: BUTTON_POS_INVALID` |
 | `editMessageText` | the message is an invoice | `Bad Request: message can't be edited` |
 | `copyMessage` | the message is an invoice | `Bad Request: the message can't be copied` |
 | `answerPreCheckoutQuery` | `ok` is not true and `error_message` is empty | `Bad Request: parameter "error_message" is required` |
@@ -291,6 +302,7 @@ Additional refusals for the extended methods:
 | inline answer | unknown/already answered query / over 50 results / invalid or duplicate result id | The query error above / `Bad Request: too many inline query results specified` / `Bad Request: RESULT_ID_INVALID` / `Bad Request: RESULT_ID_DUPLICATE`. |
 | `answerWebAppQuery` | launch query unknown, reset or already consumed | The query error above. |
 | chat information | chat unknown / invalid or unknown user | `Bad Request: chat not found` / `Bad Request: invalid user_id specified` / `Bad Request: user not found` |
+| any method naming an upgraded basic group | always | `Bad Request: group chat was upgraded to a supergroup chat`, with `parameters.migrate_to_chat_id` |
 | `getUpdates` | webhook active (409) | `Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first` |
 | `setWebhook` | malformed URL / external HTTP / unsupported external port | `Bad Request: invalid webhook URL specified` / `Bad Request: bad webhook: An HTTPS URL must be provided for webhook` / `Bad Request: bad webhook: Webhook can be set up only on ports 80, 88, 443 or 8443` |
 | `setWebhook` | secret over 256 bytes / characters outside A-Z, a-z, 0-9, `_`, `-` | `Bad Request: secret token is too long` / `Bad Request: secret token contains illegal characters` |
@@ -307,13 +319,57 @@ The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate
 
 ## Not implemented
 
-- Methods outside the [table above](#methods) answer `404` with `Not Found: method not found`, including stickers, polls, live photos, games, forum topics and chat administration mutations.
+- Methods outside the [table above](#methods) answer `404` with `Not Found: method not found`, including stickers, polls, live photos, games and forum topics.
 - Incoming location/contact messages, `edited_message`, `channel_post`, membership and reaction updates are not injected. Chat configuration changes no update queue.
 - Inline games/stickers, rich input content, cache behavior, pagination buttons and query timeouts are not modelled. `cache_time`, `is_personal`, `next_offset` and the inline results button are only recorded. Inline widget message content and widget previews are not implemented.
 - Widget wallet cards, `sign_data` and `sent_transaction` queries are not modelled; only `type: {"type":"data"}` is produced. The chat page uses browser JavaScript rather than QuickJS and does not enforce Telegram's full widget DOM/CSS profile or Web Storage.
 - Payments go no further than a bot can see: a payment provider, shipping, order info and `order_info` on the pre-checkout query and the payment are not modelled, `shipping_query` is never sent, and a charge can only be taken or returned - never left pending. `is_ephemeral` of a command is kept but a message is never ephemeral.
 - Media thumbnails, codec validation, live locations, full Telegram membership/permission enforcement and service-message copy restrictions other than an invoice's are not modelled. Inline media edits currently resolve uploads as ordinary edits; Telegram permits only existing ids and URLs for inline targets.
 - Formatting: `parse_mode` is not parsed, so `can't parse entities` never happens on its own. Schedule a fault with `contains` to see it ([sim-api.md](sim-api.md#faults)).
-- Reply keyboards (`keyboard`, `remove_keyboard`, `force_reply`) are accepted and dropped, not shown.
+- Reply keyboards support ordinary text buttons. Contact/location/poll requests and other special button actions are not simulated. `selective` is retained but not scoped to individual group members; the menu and ForceReply request are chat-wide.
 - Rate limits are not enforced. A `429` happens only when a fault is scheduled.
 - Two concurrent polls are answered from the same queue; only the polling/webhook conflict is implemented.
+
+## Reply keyboards and requested replies
+
+Successful sends keep `ReplyKeyboardMarkup` as chat state, with `keyboard`,
+`resize_keyboard`, `one_time_keyboard`, `is_persistent` and
+`input_field_placeholder`. An ordinary message or an inline keyboard leaves
+that menu installed. `ReplyKeyboardRemove` removes it immediately; an old
+button then fails simulation with 404 and no update. Inline callbacks retain
+their separate meaning.
+
+`reply_markup` is read the way the Bot API server reads it. A reply button is
+an object with `text` or the text alone as a string (`{"keyboard":[["Yes","No"]]}`).
+A markup is one kind only, in this order: a `keyboard` with at least one row,
+else an `inline_keyboard`, else `remove_keyboard` (or its old name
+`hide_keyboard`), else `force_reply`. So `{"keyboard":[["A"]],"remove_keyboard":true}`
+installs the keyboard, and an inline keyboard with `"force_reply":true` asks
+for no reply. A button without text is dropped, and so is a row left empty; a
+keyboard of such buttons alone is no markup at all, as TDLib reads it. A
+keyboard the Bot API server cannot read is refused in its words:
+
+| `keyboard` | Refusal |
+|------------|---------|
+| not an array, `null` included | `Bad Request: field "keyboard" must be of type Array` |
+| a row that is neither an array nor `null` | `Bad Request: expected an Array of KeyboardButton` |
+| a button that is neither a string nor an object | `Bad Request: can't parse KeyboardButton: KeyboardButton must be a String or an Object` |
+| a button object without `text` | `Bad Request: can't parse KeyboardButton: Can't find field "text"` |
+| a `text` that is neither a string nor a number | `Bad Request: can't parse KeyboardButton: Field "text" must be of type String` |
+
+`one_time_keyboard` hides the menu only after one of its buttons is pressed,
+not after an unrelated typed message, and preserves its buttons. The chat
+page's "Reply keyboard" button reopens it. The Go and simulation press APIs
+can press a hidden menu. Resize/persistence flags are retained as presentation
+hints; the page uses its own compact button layout. `ForceReply` stores its
+message ID and placeholder independently of the menu. The browser addresses
+the next typed response to that message, and a keyboard press does the same;
+the resulting update has `reply_to_message`. A matching reply clears the
+outstanding request. Deleting the message that installed the menu, or the one
+that asked with `ForceReply`, takes that control away, as TDLib clears a
+chat's reply markup together with its message.
+These controls are exposed in `ChatView`, not added to Telegram's returned
+`Message.reply_markup`, whose public Go type remains the inline keyboard.
+
+See [the simulation press route](sim-api.md#post-simkeyboardpress) and the
+[official markup definitions](https://core.telegram.org/bots/api#replykeyboardmarkup).

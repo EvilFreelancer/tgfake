@@ -23,11 +23,16 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | Method and path | What it does |
 |-----------------|--------------|
 | `POST /sim/message` | The person sends a text message. |
+| `POST /sim/message/edit` | Edit an existing incoming message and inject `edited_message`. |
+| `POST /sim/reaction` | Inject a `message_reaction` update. |
 | `POST /sim/media` | The person sends a file, photo, video or audio message. |
 | `POST /sim/inline` | Inject an inline query (requires `--inline`). |
 | `GET /sim/inline` | Read queries and the bot's offered results. |
 | `POST /sim/inline/choose` | Select an offered result and queue `chosen_inline_result`. |
 | `POST /sim/chat/configure` | Configure chat metadata and members. |
+| `POST /sim/chat/migrate` | Upgrade a group to a new supergroup and emit both migration service messages. |
+| `POST /sim/member` | Inject a member or bot join, leave, or promotion lifecycle event. |
+| `POST /sim/join-request` | Inject a `chat_join_request` for approval or decline by the bot. |
 | `POST /sim/user/profile` | Configure a user's profile photos. |
 | `POST /sim/callback` | The person taps an inline keyboard button. |
 | `POST /sim/widget/query` | The person makes a `TelegramWidget.request` in a widget. |
@@ -41,6 +46,9 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | `GET /sim/file/{id}` | The bytes of any stored incoming or outgoing media. |
 | `GET /sim/chats` | The chats the stand knows. |
 | `GET /sim/state` | The bot, the update queue, the subscription, the commands, the menu button and the faults. |
+| `GET /sim/clock` | Read the server clock. |
+| `POST /sim/clock/advance` | Move the server clock by a signed number of seconds. |
+| `POST /sim/clock/set` | Set the server clock to a Unix timestamp. |
 | `POST /sim/webapp/launch` | The person opens a Mini App. |
 | `POST /sim/webapp/data` | Deliver a Mini App's `web_app_data` service message. |
 | `POST /sim/webapp/share` | Share a prepared inline message for its designated user. |
@@ -68,8 +76,16 @@ The person types a message. It is stored in the chat and becomes the next `messa
 | `chat_title` | string | `Fake group` for a group | The title of a group chat, set when the chat has none yet. |
 | `reply_to_message_id` | integer | none | Makes the message a reply to a message of the chat. An id that is not in the chat is ignored. |
 | `mention` | boolean | `false` | Puts the bot's `@username` and a space in front of the text, with a `mention` entity: how a group message addresses the bot. |
+| `sender_chat` | Chat | none | The group itself for an anonymous administrator, or a linked channel for an automatic post. |
+| `is_automatic_forward` | boolean | `false` | Marks a linked-channel post. |
+| `forward_origin` | MessageOrigin | none | A forwarded user, hidden user, chat, or channel origin. |
+| `entities` | MessageEntity[] | none | Arbitrary incoming entities such as `url`, `text_link`, `mention`, and `custom_emoji`; generated command/mention entities are appended. |
+| `sticker` | Sticker | none | Sends a minimal incoming sticker message; `text` may then be empty. |
+| `message_thread_id`, `is_topic_message` | integer, boolean | none, `false` | Marks a message as belonging to a forum topic. |
 
 A text that starts with a command, such as `/start` or `/help@tgfake_bot`, carries a `bot_command` entity at offset 0, which is what makes it a command for every Bot API library.
+
+In a configured group, a sender whose member status is `left` or `kicked`, or a restricted member without `can_send_messages`, is refused with HTTP 403 and a simulation `error`. An expired temporary restriction is cleared before this check.
 
 The answer is the id of the update and the id of the message in its chat:
 
@@ -129,6 +145,33 @@ Configuration replaces metadata and membership, preserves the transcript and cre
 ```bash
 curl -s -X POST $O/sim/chat/configure -d '{"chat":{"id":-100,"type":"supergroup","title":"Test","username":"test_group"},"members":[{"status":"creator","is_anonymous":false,"user":{"id":4242,"is_bot":false,"first_name":"Alice"}}]}'
 ```
+
+## Membership and lifecycle injection
+
+`POST /sim/member` accepts `chat_id`, `action` (`join`, `leave` or
+`promote`), a Bot API `user`, and optional `invite_link` and administrator
+`rights`. Join and leave append the corresponding service message and queue a
+`chat_member` update; a transition of the configured bot queues
+`my_chat_member`. Promotion changes the member record without a service
+message. Bot moderation methods queue the same membership update when the
+active `allowed_updates` subscription includes it.
+
+`POST /sim/join-request` accepts `chat_id`, `user`, optional `bio` and
+`invite_link`, stores the pending request and queues `chat_join_request`.
+`approveChatJoinRequest` consumes it, adds the member and queues
+`chat_member`; decline only consumes it. A missing request is refused with
+`Bad Request: HIDE_REQUESTER_MISSING`.
+
+`POST /sim/message/edit` accepts `chat_id`, `message_id`, replacement `text`
+and optional `entities`, updates the transcript and queues `edited_message`.
+`POST /sim/reaction` accepts `chat_id`, `message_id`, `user` or `actor_chat`,
+and `old_reaction`/`new_reaction` arrays, then queues `message_reaction`.
+
+`POST /sim/chat/migrate` accepts `chat_id` of a basic group and an unused
+`new_chat_id`. It creates the supergroup, copies members and metadata, and
+queues the old `migrate_to_chat_id` and new `migrate_from_chat_id` service
+messages. Later Bot API calls naming the old group receive Telegram's upgrade
+error and `parameters.migrate_to_chat_id`.
 
 ## POST /sim/user/profile
 
@@ -495,9 +538,17 @@ Starts a new session without restarting the command. It answers `{"ok":true}` an
 
 Update ids keep growing: a bot that is polling remembers the last id it confirmed and would drop anything numbered below it. The `allowed_updates` subscription, configured webhook and signing token stay. Inline/prepared, shared-widget and widget-query id counters also keep growing to avoid collisions with retained client ids. A Serverless project's database is not reset.
 
+The simulation clock also stays unchanged across reset.
+
 ```bash
 curl -s -X POST $O/sim/reset
 ```
+
+## Simulation clock
+
+`GET /sim/clock` returns `{"unix":1760000000,"time":"2025-10-09T08:53:20Z"}`. `POST /sim/clock/advance` accepts `{"seconds":3600}` (negative values move it backwards), and `POST /sim/clock/set` accepts `{"unix":1760000000}`. Message and call dates, temporary moderation expiry, drafts, typing, prepared messages, webhooks and Mini App signing use this clock. Long-poll and network-delay waits remain real durations, so advancing time never blocks an HTTP request.
+
+In-process tests can set `Options.Now` to provide a deterministic base clock. With no option, the clock follows real time; advance/set apply an offset to it.
 
 ## Recipes
 
@@ -557,3 +608,97 @@ curl -s -X POST $O/sim/message -d '{"text": "are you back?"}' > /dev/null
 ```
 
 The outbox shows how often the bot polled during the outage, which is how its back-off can be checked, and the transcript shows whether it recovered. A fault with `times` ends an outage on its own after that many calls.
+
+## POST /sim/keyboard/press
+
+Press an ordinary text button of the chat's current reply keyboard. This
+creates a `message` update, with the selected user's identity, rather than a
+`callback_query`. Fields are `chat_id`, `user_id`, `username`, `first_name`,
+`row` and `column`; identity defaults match `/sim/message`. Indices start at
+zero. The chat's history and update queue remain unchanged if there is no
+active keyboard or the position is out of range (404 with `error`).
+
+```bash
+curl -s -X POST "$O/sim/keyboard/press" \
+  -d '{"chat_id":4242,"user_id":77,"username":"bob","row":0,"column":1}'
+```
+
+The response is `{update_id, message_id}`. A press hides a one-time menu and,
+when ForceReply is outstanding, sends the button text as a reply to its
+message and clears that request. A hidden one-time menu is still active and
+can be pressed again; a removed menu cannot. `/sim/callback` is exclusively
+for inline keyboards. `ChatView` exposes `reply_keyboard`, `keyboard_hidden`
+and `force_reply` (markup plus `message_id`). Message views retain their own
+`reply_keyboard`, `remove_keyboard` and `force_reply` for inspection. Ordinary
+typed responses use `/sim/message` with `reply_to_message_id`; ForceReply does
+not automatically rewrite API inputs. The browser chooses that ID for the next
+typed response.
+
+Only text buttons are simulated. Special KeyboardButton actions are ignored;
+use text-only keyboards in tests. `selective` is preserved but the current
+menu, hidden flag and outstanding ForceReply are chat-wide, including groups.
+`/sim/reset` removes all these chat controls, and the bot's deletion of the message that installed the menu or asked with ForceReply removes that control. Returned views are snapshots.
+
+## Addressed network faults
+
+Existing `/sim/fault` payloads retain their behavior. New fields are additive:
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `chat_id` | 0 | Exact numeric chat ID for Bot API parameters. Zero matches any chat. |
+| `target` | empty | Empty targets Bot API methods. `file` targets authenticated `/file/bot<token>/...` downloads only. |
+| `path` | empty | Exact relative download path, such as `photo/file-1`; empty matches any file. |
+| `delay_ms` | 0 | Delay in milliseconds, cancellable by the client or `Server.Close`. |
+| `disconnect` | false | Abort the HTTP connection/stream without a response. |
+| `after_apply` | false | Run the operation before delaying or losing its response. |
+
+For a delay-only or disconnect rule, omit `code` to continue the operation or
+abort it as requested. A legacy rule without network fields and without `code`
+still defaults to 500. With an explicit code, a pre-apply delay is followed by
+that HTTP error. `after_apply` uses only delay/disconnect, ignoring `code`;
+validation errors still return normally and are never marked applied.
+
+```json
+{"method":"sendMessage","chat_id":111,"code":403}
+```
+
+```json
+{"target":"file","path":"photo/file-1","disconnect":true,"times":1}
+```
+
+```json
+{"method":"sendMessage","chat_id":111,"disconnect":true,"after_apply":true,"times":1}
+```
+
+Token/path parsing runs before fault matching. Bot faults are chosen after
+authentication and parameter parsing, before method validation; exact method
+wins over `*`, with all specified chat/contains filters ANDed. There remains
+one rule per method, newest wins. File rules have their own single slot,
+independent of the Bot API catch-all; file authentication and existence checks
+run first. For files, `contains` searches `path` and `file_id`. File download
+URLs do not identify a chat, so `chat_id` cannot match them. A rule that could never fire is refused with 400 and `error` and nothing is scheduled: a `target` other than empty or `file`, `chat_id` on a file rule, or `path` on a Bot API rule. Read-only
+simulation file previews are unaffected. Clear a file rule with
+`{"target":"file","clear":true}` or `ClearFault("file:*")`; DELETE clears all.
+
+Matched rules are reserved/count down before delay, including cancelled
+attempts. No mutex is held while waiting. Delays of different chats are
+independent. A pre-apply fault changes no chat state. `after_apply` explicitly
+permits an ambiguous outcome: `sendMessage` is in history although the caller
+gets a network error. Retrying it can create a duplicate; no exactly-once
+semantics are implied. A download is read-only; "applied" means it reached
+the successful read path.
+
+Outbox calls add `fault`, `applied` and `response_sent`. Status 0 and response
+null mean no response was written after a disconnect/cancel. A successful
+write only means Go accepted the write, not proof the remote client received
+it. Faulted downloads are logged as method `file` without binary bytes.
+Unfaulted downloads retain their existing behavior and are not added to the
+Bot API outbox. A rule's delay includes cancelled attempts in diagnostics.
+
+## LLM diagnostics
+
+With `--llm`, `/sim/llm/log`, `/sim/llm/script` and `/sim/llm/reset` expose the
+independent scripted model's journal, configuration and cursor reset. See
+[scripted-model.md](scripted-model.md#journal-and-reset) for methods and fields.
+The command's `/sim/reset` resets both components while preserving Telegram's
+monotonically increasing update IDs.

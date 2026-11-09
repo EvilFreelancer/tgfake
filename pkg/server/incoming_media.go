@@ -26,8 +26,9 @@ type IncomingMedia struct {
 	FileName string `json:"file_name"`
 	// MimeType is the type the person's client names; empty detects it from
 	// the bytes.
-	MimeType string `json:"mime_type,omitempty"`
-	Caption  string `json:"caption,omitempty"`
+	MimeType        string                 `json:"mime_type,omitempty"`
+	Caption         string                 `json:"caption,omitempty"`
+	CaptionEntities []botapi.MessageEntity `json:"caption_entities,omitempty"`
 	// MediaGroupID marks the messages of one album: Telegram delivers an album
 	// as one message per item sharing a media_group_id, with the caption on
 	// one of them.
@@ -65,10 +66,14 @@ func (s *Server) InjectMedia(in IncomingMedia) (int, int, error) {
 	}
 	in.normalize()
 	caption := in.Caption
-	var entities []botapi.MessageEntity
+	entities := append([]botapi.MessageEntity(nil), in.CaptionEntities...)
 	if in.Mention {
 		mention := "@" + s.opts.BotUsername
 		caption = strings.TrimRight(mention+" "+caption, " ")
+		shift := utf16Len(mention) + 1
+		for index := range entities {
+			entities[index].Offset += shift
+		}
 		entities = append(entities, botapi.MessageEntity{Type: "mention", Offset: 0, Length: utf16Len(mention)})
 	}
 	if m := commandPattern.FindString(caption); m != "" {
@@ -111,7 +116,11 @@ func (s *Server) InjectMedia(in IncomingMedia) (int, int, error) {
 	defer s.mu.Unlock()
 	chat := s.ensureChatLocked(in.ChatID, in.ChatType, in.ChatTitle, user)
 	file = s.keepFileLocked(file)
-	message := &botapi.Message{From: user, Chat: chat.wire(), Date: s.now().Unix(), Caption: caption, CaptionEntities: entities, MediaGroupID: in.MediaGroupID}
+	message := &botapi.Message{
+		From: user, Chat: chat.wire(), Date: s.now().Unix(), Caption: caption,
+		CaptionEntities: entities, MediaGroupID: in.MediaGroupID,
+		ForwardOrigin: in.ForwardOrigin, HasProtectedContent: in.HasProtectedContent,
+	}
 	if in.ReplyToMessageID != 0 {
 		if target := chat.byID[in.ReplyToMessageID]; target != nil {
 			message.ReplyToMessage = target.quoted()
@@ -161,6 +170,10 @@ func (s *Server) simMedia(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 72<<20))
 	if err := decoder.Decode(&in); err != nil {
 		writeJSON(w, 400, map[string]any{"error": "invalid JSON body: " + err.Error()})
+		return
+	}
+	if problem := s.incomingMessageProblem(in.IncomingMessage); problem != "" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": problem})
 		return
 	}
 	update, message, err := s.InjectMedia(in)

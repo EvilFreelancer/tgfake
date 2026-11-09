@@ -43,8 +43,18 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.token = token
 		s.mu.Unlock()
 	}
-	if fault := s.takeFault(method, params); fault != nil {
-		s.writeError(w, method, params, fault.Code, fault.Description, fault.RetryAfter)
+	if chatID, ok := chatIDOf(params); ok {
+		s.mu.Lock()
+		migrateTo := s.migrations[chatID]
+		s.mu.Unlock()
+		if migrateTo != 0 {
+			s.writeMigrateError(w, method, params, migrateTo)
+			return
+		}
+	}
+	var handled bool
+	w, handled = s.beginFault(w, r, method, params, s.takeFault(method, params))
+	if handled {
 		return
 	}
 	switch strings.ToLower(method) {
@@ -92,6 +102,10 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.answerInline(w, r, method, params)
 	case "getchat", "getchatmember", "getchatmembercount", "getchatadministrators", "getuserprofilephotos":
 		s.chatInformation(w, method, params)
+	case "restrictchatmember", "banchatmember", "unbanchatmember", "promotechatmember", "setchatpermissions", "setchatadministratorcustomtitle":
+		s.moderateChat(w, method, params)
+	case "approvechatjoinrequest", "declinechatjoinrequest":
+		s.answerChatJoinRequest(w, method, params)
 	case "editmessagetext", "editmessagereplymarkup":
 		s.editMessage(w, method, params)
 	case "deletemessage":
@@ -277,6 +291,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, method string, params url.Va
 	msg.ReplyMarkup = markup
 	msg.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(msg, true, params.Get("parse_mode"), false)
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)
@@ -393,7 +408,7 @@ func (s *Server) deleteMessage(w http.ResponseWriter, method string, params url.
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: message to delete not found", 0)
 		return
 	}
-	target.deleted = true
+	chat.deleteLocked(target)
 	s.mu.Unlock()
 	s.writeResult(w, method, params, true)
 }
@@ -481,6 +496,7 @@ func (s *Server) sendRichMessage(w http.ResponseWriter, method string, params ur
 	}
 	msg.HasProtectedContent = truthy(params.Get("protect_content"))
 	stored := chat.appendLocked(msg, true, "", true)
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)
@@ -542,7 +558,16 @@ func (s *Server) writeError(w http.ResponseWriter, method string, params url.Val
 	s.respond(w, method, params, code, body)
 }
 
+func (s *Server) writeMigrateError(w http.ResponseWriter, method string, params url.Values, migrateTo int64) {
+	body, _ := json.Marshal(apiResponse{OK: false, ErrorCode: http.StatusBadRequest, Description: "Bad Request: group chat was upgraded to a supergroup chat", Parameters: &responseParams{MigrateToChatID: migrateTo}})
+	s.respond(w, method, params, http.StatusBadRequest, body)
+}
+
 func (s *Server) respond(w http.ResponseWriter, method string, params url.Values, status int, body []byte) {
+	if fw, ok := w.(*faultWriter); ok {
+		fw.respond(method, params, status, body)
+		return
+	}
 	if method != "" {
 		s.mu.Lock()
 		s.recordLocked(method, params, status, body)
@@ -610,8 +635,10 @@ func replyTargetLocked(chat *chatState, params url.Values) (*botapi.Message, str
 // inline_keyboard with a value that is not an array.
 const inlineKeyboardNotArray = `Bad Request: field "inline_keyboard" must be of type Array`
 
-// parseKeyboard reads reply_markup; a markup of another kind (a reply
-// keyboard, a remove) is not an inline keyboard and reads as none, and so does
+// parseKeyboard reads the inline part of reply_markup. Other controls are
+// stored separately by applyReplyMarkupLocked, and a reply keyboard the Bot API
+// server cannot parse is refused here in its words (keyboardRows). A markup of
+// another kind (a reply keyboard, a remove) is not an inline keyboard and reads as none, and so does
 // an empty array. An inline_keyboard of any other type, null included, is
 // refused the way the Bot API server refuses it: that null is what a library
 // sends for a keyboard built from no rows, and a real chat never shows the
@@ -624,12 +651,24 @@ func parseKeyboard(raw string) (*botapi.InlineKeyboardMarkup, string) {
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		return nil, ""
 	}
+	lines := 0
+	if raw, ok := fields["keyboard"]; ok {
+		var problem string
+		if _, lines, problem = keyboardRows(raw); problem != "" {
+			return nil, problem
+		}
+	}
 	value, ok := fields["inline_keyboard"]
 	if !ok {
 		return nil, ""
 	}
 	if trimmed := strings.TrimSpace(string(value)); !strings.HasPrefix(trimmed, "[") {
 		return nil, inlineKeyboardNotArray
+	}
+	// A keyboard with rows is the markup, and an inline keyboard beside it is
+	// not, even when TDLib then drops every reply button.
+	if lines > 0 {
+		return nil, ""
 	}
 	var kb botapi.InlineKeyboardMarkup
 	if err := json.Unmarshal([]byte(raw), &kb); err != nil || len(kb.InlineKeyboard) == 0 {

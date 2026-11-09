@@ -68,6 +68,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	llmModel := fs.String("llm-model", llmstub.DefaultModel, "model id the scripted model reports")
 	llmScript := fs.String("llm-script", "", "JSON file with [{\"match\": \"...\", \"answer\": \"...\"}] rules; a rule with \"tool\": {\"name\": ..., \"arguments\": {...}} calls that tool first and answers its result")
 	llmDelay := fs.Duration("llm-delay", 50*time.Millisecond, "pause between streamed chunks")
+	llmClientHeader := fs.String("llm-client-header", "", "HTTP header selecting an LLM scenario client instead of request.user")
 	llmChunk := fs.Int("llm-chunk-words", 1, "words per streamed chunk")
 	var llmAnswers, llmStripTags stringList
 	fs.Var(&llmAnswers, "llm-answer", "a canned answer, used in turn; repeatable")
@@ -113,13 +114,18 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	var stub *llmstub.Server
 	if *llm {
-		stub = &llmstub.Server{Model: *llmModel, Answers: llmAnswers, Delay: *llmDelay, ChunkWords: *llmChunk, StripTags: llmStripTags}
+		if err := llmstub.CheckClientHeader(*llmClientHeader); err != nil {
+			return fmt.Errorf("--llm-client-header: %w", err)
+		}
+		stub = &llmstub.Server{ClientHeader: *llmClientHeader, Model: *llmModel, Answers: llmAnswers, Delay: *llmDelay, ChunkWords: *llmChunk, StripTags: llmStripTags}
 		if *llmScript != "" {
 			rules, err := loadRules(*llmScript)
 			if err != nil {
 				return err
 			}
-			stub.Rules = rules
+			if err := stub.SetRules(rules); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -164,7 +170,18 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	defer stopPoll()
 	polled := make(chan error, 1)
 	if cloud != nil {
-		go func() { polled <- cloud.Poll(pollCtx) }()
+		go func() {
+			polled <- cloud.Poll(pollCtx)
+			close(polled)
+		}()
+	}
+	// waitPoll waits for the poller to stop. Its error after a shutdown is
+	// expected, and one that came first is already in pollErr; ranging to the
+	// close also returns when that one was taken, where a second receive
+	// would wait forever.
+	waitPoll := func() {
+		for range polled {
+		}
 	}
 	var pollErr error
 	select {
@@ -173,7 +190,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fake.Close()
 		if cloud != nil {
 			cloud.Close()
-			<-polled
+			waitPoll()
 		}
 		return err
 	case pollErr = <-polled:
@@ -182,9 +199,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	stopPoll()
 	if cloud != nil {
 		cloud.Close()
-		if pollErr == nil {
-			<-polled
-		}
+		waitPoll()
 	}
 	// Release the long polls first, then let the listener drain.
 	fake.Close()
@@ -219,9 +234,13 @@ func newMux(fake *server.Server, stub *llmstub.Server) http.Handler {
 	if stub == nil {
 		return fake.Handler()
 	}
+	model, telegram := stub.Handler(), fake.Handler()
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", stub.Handler())
-	mux.Handle("/", fake.Handler())
+	mux.Handle("/v1/", model)
+	mux.Handle("/sim/llm/", model)
+	// One reset for the stand: the model's cursors and journal, then the fake.
+	mux.HandleFunc("POST /sim/reset", func(w http.ResponseWriter, r *http.Request) { stub.Reset(); telegram.ServeHTTP(w, r) })
+	mux.Handle("/", telegram)
 	return mux
 }
 

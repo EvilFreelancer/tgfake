@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -69,6 +70,14 @@ func TestSendInvoice_Refusals(t *testing.T) {
 		{"a keyboard with the Pay button on the second row", func(f url.Values) {
 			f.Set("reply_markup", `{"inline_keyboard":[[{"text":"Cancel","callback_data":"cancel"}],[{"text":"Pay","pay":true}]]}`)
 		}, "Bad Request: BUTTON_POS_INVALID"},
+		// api.telegram.org answers a reply keyboard, its removal or ForceReply on
+		// an invoice the same way, a Pay button beside a reply keyboard included.
+		{"a reply keyboard", func(f url.Values) { f.Set("reply_markup", `{"keyboard":[["A"]]}`) }, "Bad Request: REPLY_MARKUP_BUY_EMPTY"},
+		{"remove_keyboard", func(f url.Values) { f.Set("reply_markup", `{"remove_keyboard":true}`) }, "Bad Request: REPLY_MARKUP_BUY_EMPTY"},
+		{"force_reply", func(f url.Values) { f.Set("reply_markup", `{"force_reply":true}`) }, "Bad Request: REPLY_MARKUP_BUY_EMPTY"},
+		{"a reply keyboard beside a Pay button", func(f url.Values) {
+			f.Set("reply_markup", `{"keyboard":[["A"]],"inline_keyboard":[[{"text":"Pay","pay":true}]]}`)
+		}, "Bad Request: REPLY_MARKUP_BUY_EMPTY"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -82,6 +91,51 @@ func TestSendInvoice_Refusals(t *testing.T) {
 				t.Fatal("a refused invoice must not reach the chat")
 			}
 		})
+	}
+}
+
+// An invoice sent without a keyboard carries Telegram's own Pay button, the one
+// api.telegram.org returns in reply_markup (seen live as "Заплатить ⭐️1" for a
+// Russian-speaking owner; the stand writes it in English).
+func TestSendInvoice_WithoutAKeyboardCarriesThePayButton(t *testing.T) {
+	s := newStand(t, Options{})
+	cases := []struct{ currency, provider, prices, markup, want string }{
+		{"XTR", "", `[{"label":"Premium","amount":150}]`, "", "Pay ⭐️150"},
+		{"XTR", "", `[{"label":"Premium","amount":1}]`, `{"keyboard":[]}`, "Pay ⭐️1"},
+		{"USD", "test-provider", `[{"label":"Fee","amount":150}]`, `{"inline_keyboard":[]}`, "Pay 1.50 USD"},
+		{"JPY", "test-provider", `[{"label":"Fee","amount":150}]`, "", "Pay 150 JPY"},
+		{"BHD", "test-provider", `[{"label":"Fee","amount":1500}]`, "", "Pay 1.500 BHD"},
+	}
+	for _, c := range cases {
+		form := starsInvoiceForm()
+		form.Set("currency", c.currency)
+		form.Set("provider_token", c.provider)
+		form.Set("prices", c.prices)
+		form.Set("reply_markup", c.markup)
+		status, body := s.call("sendInvoice", form)
+		if status != http.StatusOK {
+			t.Fatalf("%s: %d %v", c.want, status, body)
+		}
+		raw, _ := json.Marshal(result(t, body)["reply_markup"])
+		if want := `{"inline_keyboard":[[{"pay":true,"text":"` + c.want + `"}]]}`; string(raw) != want {
+			t.Errorf("reply_markup %s, want %s", raw, want)
+		}
+	}
+}
+
+// An empty reply keyboard, or one of buttons without text, is no markup at all,
+// and api.telegram.org sends the invoice as if none was given.
+func TestSendInvoice_AnEmptyReplyKeyboardIsNoMarkup(t *testing.T) {
+	s := newStand(t, Options{})
+	for _, markup := range []string{`{"keyboard":[]}`, `{"keyboard":[[""]]}`} {
+		form := starsInvoiceForm()
+		form.Set("reply_markup", markup)
+		if status, body := s.call("sendInvoice", form); status != http.StatusOK {
+			t.Fatalf("%s: %d %v", markup, status, body)
+		}
+	}
+	if v := s.fake.Chat(4242); v.ReplyKeyboard != nil || v.ForceReply != nil {
+		t.Fatalf("an invoice changed the chat's controls: %+v %+v", v.ReplyKeyboard, v.ForceReply)
 	}
 }
 
