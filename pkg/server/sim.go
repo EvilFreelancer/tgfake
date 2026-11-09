@@ -14,6 +14,8 @@ import (
 //
 //	POST /sim/message           {chat_id, chat_type, user_id, username, text, reply_to_message_id, mention}
 //	POST /sim/callback          {chat_id, user_id, message_id, data} or {chat_id, label}
+//	POST /sim/widget/query      {chat_id, user_id, message_id, data}
+//	GET  /sim/widget/answer?id=  whether the bot answered, and its data
 //	POST /sim/draft/stop        {chat_id, draft_id}
 //	POST /sim/invoice/pay       {chat_id, message_id, user_id, username, first_name}
 //	POST /sim/payment           {chat_id, user_id, kind, currency, total_amount, invoice_payload, ...}
@@ -31,6 +33,8 @@ import (
 func (s *Server) registerSim(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sim/message", s.simMessage)
 	mux.HandleFunc("POST /sim/callback", s.simCallback)
+	mux.HandleFunc("POST /sim/widget/query", s.simWidgetQuery)
+	mux.HandleFunc("GET /sim/widget/answer", s.simWidgetAnswer)
 	mux.HandleFunc("POST /sim/draft/stop", s.simDraftStop)
 	mux.HandleFunc("POST /sim/invoice/pay", s.simInvoicePay)
 	mux.HandleFunc("POST /sim/payment", s.simPayment)

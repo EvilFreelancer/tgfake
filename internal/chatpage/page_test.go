@@ -27,3 +27,23 @@ func TestServeWritesTheSelfContainedPage(t *testing.T) {
 		}
 	}
 }
+
+func TestPageIncludesSandboxedWidgetRuntime(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Serve(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body, _ := io.ReadAll(rec.Result().Body)
+	page := string(body)
+	for _, part := range []string{
+		"window.TelegramWidget = W",
+		"allow-scripts allow-popups",
+		"connect-src 'none'",
+		"/sim/widget/query",
+		"/sim/widget/answer",
+		"chatDataChanged",
+		"publicDataChanged",
+	} {
+		if !strings.Contains(page, part) {
+			t.Errorf("widget runtime is missing %q", part)
+		}
+	}
+}

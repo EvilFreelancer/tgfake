@@ -132,8 +132,8 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 			problem = "Bad Request: message can't be forwarded"
 			break
 		}
-		if !forward && !bulk && message.msg.Invoice != nil {
-			// An invoice can be forwarded, not copied.
+		if !forward && ((!bulk && message.msg.Invoice != nil) || message.msg.Widget != nil) {
+			// Invoices and widgets can be forwarded, not copied.
 			problem = "Bad Request: the message can't be copied"
 			break
 		}
@@ -171,6 +171,9 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 			if copy.ForwardOrigin == nil {
 				copy.ForwardOrigin = &botapi.MessageOrigin{Type: "user", Date: original.msg.Date, SenderUser: original.msg.From}
 			}
+			if copy.Widget != nil {
+				copy.Widget.ChatData = ""
+			}
 		} else {
 			copy.ForwardOrigin, copy.ViaBot = nil, nil
 			copy.ReplyMarkup = markup
@@ -183,6 +186,8 @@ func (s *Server) relayMessages(w http.ResponseWriter, method string, params url.
 		}
 		stored := chat.appendLocked(copy, true, original.parseMode, original.rich)
 		stored.file = original.file
+		stored.widgetAllowQueries = original.widgetAllowQueries
+		stored.widgetForward = original.widgetForward || (forward && copy.Widget != nil)
 		stored.invoicePayload = original.invoicePayload
 		sent = stored.clone()
 		results = append(results, botapi.MessageID{MessageID: sent.MessageID})

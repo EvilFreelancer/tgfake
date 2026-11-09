@@ -268,38 +268,81 @@ type MessageOrigin struct {
 	MessageID  int    `json:"message_id,omitempty"`
 }
 
+// Widget is an HTML widget carried by a message. ID is present only for a
+// shared widget; the two data fields are opaque UTF-8 text, usually JSON.
+type Widget struct {
+	ID         string `json:"id,omitempty"`
+	Width      int    `json:"width,omitempty"`
+	Height     int    `json:"height,omitempty"`
+	HTML       string `json:"html"`
+	PublicData string `json:"public_data,omitempty"`
+	ChatData   string `json:"chat_data,omitempty"`
+}
+
+// WidgetQueryTypeData identifies an ordinary data request from a widget.
+// Wallet signing and transaction query variants are not modelled.
+type WidgetQueryType struct {
+	Type string `json:"type"`
+}
+
+// WidgetQuery is a request from a widget in an original bot or inline message.
+type WidgetQuery struct {
+	ID              string          `json:"id"`
+	From            User            `json:"from"`
+	Chat            *Chat           `json:"chat,omitempty"`
+	MessageID       int             `json:"message_id,omitempty"`
+	InlineMessageID string          `json:"inline_message_id,omitempty"`
+	ChatInstance    string          `json:"chat_instance"`
+	ChatType        string          `json:"chat_type,omitempty"`
+	Type            WidgetQueryType `json:"type"`
+	Data            string          `json:"data"`
+	WidgetID        string          `json:"widget_id,omitempty"`
+}
+
+// SharedWidgetQuery is a request from a forwarded shared widget. Telegram
+// deliberately gives the bot no location of the forward.
+type SharedWidgetQuery struct {
+	ID       string          `json:"id"`
+	From     User            `json:"from"`
+	Type     WidgetQueryType `json:"type"`
+	Data     string          `json:"data"`
+	WidgetID string          `json:"widget_id"`
+}
+
 // Message mirrors the subset of the Bot API Message object a bot reads
 // and writes.
 type Message struct {
-	MessageID           int                   `json:"message_id"`
-	From                *User                 `json:"from,omitempty"`
-	Chat                Chat                  `json:"chat"`
-	Date                int64                 `json:"date"`
-	EditDate            int64                 `json:"edit_date,omitempty"`
-	Text                string                `json:"text,omitempty"`
-	Caption             string                `json:"caption,omitempty"`
-	Photo               []PhotoSize           `json:"photo,omitempty"`
-	Document            *Document             `json:"document,omitempty"`
-	Video               *Video                `json:"video,omitempty"`
-	Animation           *Video                `json:"animation,omitempty"`
-	Audio               *Audio                `json:"audio,omitempty"`
-	Voice               *Audio                `json:"voice,omitempty"`
-	VideoNote           *VideoNote            `json:"video_note,omitempty"`
-	Location            *Location             `json:"location,omitempty"`
-	Contact             *Contact              `json:"contact,omitempty"`
-	Venue               *Venue                `json:"venue,omitempty"`
-	WebAppData          *WebAppData           `json:"web_app_data,omitempty"`
-	Invoice             *Invoice              `json:"invoice,omitempty"`
-	SuccessfulPayment   *SuccessfulPayment    `json:"successful_payment,omitempty"`
-	RefundedPayment     *RefundedPayment      `json:"refunded_payment,omitempty"`
-	MediaGroupID        string                `json:"media_group_id,omitempty"`
-	ForwardOrigin       *MessageOrigin        `json:"forward_origin,omitempty"`
-	ViaBot              *User                 `json:"via_bot,omitempty"`
-	HasProtectedContent bool                  `json:"has_protected_content,omitempty"`
-	Entities            []MessageEntity       `json:"entities,omitempty"`
-	CaptionEntities     []MessageEntity       `json:"caption_entities,omitempty"`
-	ReplyToMessage      *Message              `json:"reply_to_message,omitempty"`
-	ReplyMarkup         *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	MessageID             int                   `json:"message_id"`
+	From                  *User                 `json:"from,omitempty"`
+	Chat                  Chat                  `json:"chat"`
+	Date                  int64                 `json:"date"`
+	EditDate              int64                 `json:"edit_date,omitempty"`
+	Text                  string                `json:"text,omitempty"`
+	Caption               string                `json:"caption,omitempty"`
+	Photo                 []PhotoSize           `json:"photo,omitempty"`
+	Document              *Document             `json:"document,omitempty"`
+	Video                 *Video                `json:"video,omitempty"`
+	Animation             *Video                `json:"animation,omitempty"`
+	Audio                 *Audio                `json:"audio,omitempty"`
+	Voice                 *Audio                `json:"voice,omitempty"`
+	VideoNote             *VideoNote            `json:"video_note,omitempty"`
+	Widget                *Widget               `json:"widget,omitempty"`
+	Location              *Location             `json:"location,omitempty"`
+	Contact               *Contact              `json:"contact,omitempty"`
+	Venue                 *Venue                `json:"venue,omitempty"`
+	WebAppData            *WebAppData           `json:"web_app_data,omitempty"`
+	Invoice               *Invoice              `json:"invoice,omitempty"`
+	SuccessfulPayment     *SuccessfulPayment    `json:"successful_payment,omitempty"`
+	RefundedPayment       *RefundedPayment      `json:"refunded_payment,omitempty"`
+	MediaGroupID          string                `json:"media_group_id,omitempty"`
+	ForwardOrigin         *MessageOrigin        `json:"forward_origin,omitempty"`
+	ViaBot                *User                 `json:"via_bot,omitempty"`
+	HasProtectedContent   bool                  `json:"has_protected_content,omitempty"`
+	ShowCaptionAboveMedia bool                  `json:"show_caption_above_media,omitempty"`
+	Entities              []MessageEntity       `json:"entities,omitempty"`
+	CaptionEntities       []MessageEntity       `json:"caption_entities,omitempty"`
+	ReplyToMessage        *Message              `json:"reply_to_message,omitempty"`
+	ReplyMarkup           *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
 }
 
 // CallbackQuery is what a tap on an inline button delivers.
@@ -321,12 +364,14 @@ type MessageGenerationStopped struct {
 }
 
 // Update is one item of a getUpdates answer. The fake produces messages,
-// callback/inline queries, pre-checkout queries, inline choices and stopped
-// drafts.
+// callback/inline/widget queries, pre-checkout queries, inline choices and
+// stopped drafts.
 type Update struct {
 	UpdateID                 int                       `json:"update_id"`
 	Message                  *Message                  `json:"message,omitempty"`
 	CallbackQuery            *CallbackQuery            `json:"callback_query,omitempty"`
+	WidgetQuery              *WidgetQuery              `json:"widget_query,omitempty"`
+	SharedWidgetQuery        *SharedWidgetQuery        `json:"shared_widget_query,omitempty"`
 	PreCheckoutQuery         *PreCheckoutQuery         `json:"pre_checkout_query,omitempty"`
 	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation,omitempty"`
 	InlineQuery              *InlineQuery              `json:"inline_query,omitempty"`

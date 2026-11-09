@@ -30,6 +30,8 @@ A body that is not valid JSON is answered `400` with `invalid JSON body: <decode
 | `POST /sim/chat/configure` | Configure chat metadata and members. |
 | `POST /sim/user/profile` | Configure a user's profile photos. |
 | `POST /sim/callback` | The person taps an inline keyboard button. |
+| `POST /sim/widget/query` | The person makes a `TelegramWidget.request` in a widget. |
+| `GET /sim/widget/answer` | Read whether the bot answered a widget query, and its result. |
 | `POST /sim/draft/stop` | The person presses Stop under a streamed draft. |
 | `POST /sim/invoice/pay` | The person starts paying an invoice. |
 | `POST /sim/payment` | A payment service message arrives. |
@@ -173,6 +175,25 @@ curl -s -X POST $O/sim/callback -d '{"label": "Yes"}'
 {"callback_query_id":"cbq-1","update_id":2}
 ```
 
+## POST /sim/widget/query
+
+Makes a data request from a visible widget, as `TelegramWidget.request(data)` does. `data` is required and is 1-64 bytes. The usual `chat_id`, `user_id`, `username` and `first_name` fields have the same defaults as `/sim/callback`; `message_id` selects a widget, defaulting to the newest widget in the chat. `inline_message_id` can address an inline target instead. The target must exist, not be deleted and have been sent with `allow_queries`; a forward must be of a shared widget.
+
+The answer is `{"update_id":1,"widget_query_id":"wq-1"}`. An original queues `widget_query` with the user, data, `type: {"type":"data"}`, chat and message coordinates, and `widget_id` when shared. A forward of a shared widget queues `shared_widget_query` with only the user, data, type and `widget_id`. A missing target, a forbidden request and invalid data are refused; the query consumes no update id.
+
+```bash
+curl -s -X POST $O/sim/widget/query -d '{"chat_id":4242,"message_id":1,"data":"refresh"}'
+curl -s "$O/bot123:TEST/getUpdates?timeout=0"
+curl -s -X POST $O/bot123:TEST/answerWidgetQuery \
+  -d 'widget_query_id=wq-1' --data-urlencode 'data={"price":5.47}'
+```
+
+The bot calls `answerWidgetQuery` once. Its optional answer is at most 1024 bytes and does not edit widget state; use `editMessageWidgetData` or `editSharedWidgetData` for that.
+
+## GET /sim/widget/answer
+
+`GET /sim/widget/answer?id=wq-1` answers `{"answered":false,"result":null}` while the bot has not answered, then `{"answered":true,"result":"..."}`. An answer without data has a null result. An unknown or reset query is `404 {"error":"widget query not found"}`. The chat page polls this route to settle the requesting widget's Promise after 15 seconds at the latest. Go tests can instead call `Server.WidgetAnswer`.
+
 ## POST /sim/draft/stop
 
 The person presses the Stop button the bot put under a draft by streaming it with `can_stop=true`. The stand queues a `stopped_message_generation` update with the chat, the draft's `message_thread_id` when it had one, and its `draft_id`, provided the bot's `allowed_updates` subscription includes that kind at that moment ([bot-api.md](bot-api.md#getupdates)). The draft leaves the chat unless its latest revision set `keep_on_stop=true`; then it stays without the Stop button.
@@ -310,7 +331,7 @@ curl -s $O/sim/chat/4242
 | `callbacks` | Every `answerCallbackQuery` for a tap in this chat: `id`, `text`, `show_alert`. |
 | `menu_button` | The menu button the chat shows: its own, else the bot's ([mini-apps.md](mini-apps.md#the-menu-button)). |
 
-A message has `message_id`; `from`, which is `bot` or `user`; `username` for the person's messages; `text`; `caption`; `photo` or `document` with `file_id`, `name`, `mime_type`, `size` and, for a photo, `width` and `height`; `parse_mode` as the bot sent it; `reply_to_message_id`; the flags `edited`, `deleted` and `rich`; and `keyboard`, the rows of inline buttons. A message of the payment flow carries `invoice`, `successful_payment` or `refunded_payment`, the shapes of [`pkg/botapi`](../pkg/botapi/types.go).
+A message has `message_id`; `from`, which is `bot` or `user`; `username` for the person's messages; `text`; `caption`; `photo` or `document` with `file_id`, `name`, `mime_type`, `size` and, for a photo, `width` and `height`; `parse_mode` as the bot sent it; `reply_to_message_id`; the flags `edited`, `deleted` and `rich`; and `keyboard`, the rows of inline buttons. A message of the payment flow carries `invoice`, `successful_payment` or `refunded_payment`. A widget message carries `widget` with its HTML, optional shared `id`, size anchors and current `public_data`/`chat_data`; `widget_allow_queries` and `widget_forward` tell the chat page whether and how it may request, and `show_caption_above_media` places its caption. These are the shapes of [`pkg/botapi`](../pkg/botapi/types.go).
 
 ### The text format
 
@@ -334,6 +355,7 @@ typing…
 
 - Each message that is not deleted is one line, `[<message_id>] <who>: <text>`, where `<who>` is `bot`, the person's username, or `user` for a person with none.
 - A photo is shown as `[photo <file name> <width>x<height>]` and a document as `[document <file name>]`, each followed by its caption when it has one.
+- A widget is `[widget] <caption>`, or `[widget shared <widget_id>] <caption>` for a shared widget; the caption is omitted when there is none.
 - An invoice is shown as `[invoice <title> <total> <currency>] <description>`, a payment as `[payment <total> <currency>] <payload>` and a refund as `[refund <total> <currency>] <payload>`, the total in the smallest units of the currency.
 - The lines after the first of a multi-line text or caption are indented by four spaces.
 - Each row of a message's inline keyboard follows it on a line of its own: four spaces, then `[<button text>]` for each button, separated by spaces.
@@ -468,9 +490,10 @@ Starts a new session without restarting the command. It answers `{"ok":true}` an
 - the pre-checkout queries (an answer to a query minted before the reset is refused; their numbering goes on, so a new query never takes an old id);
 - the uploaded files (numbering starts again at `file_1`);
 - the menu buttons, the bot's and the chats'.
-- configured chat members/metadata, profile photos, inline queries/results, inline edit targets, prepared messages and issued Mini App query ids.
+- configured chat members/metadata, profile photos, inline queries/results, inline edit targets, prepared messages and issued Mini App query ids;
+- shared widgets and pending/answered widget queries.
 
-Update ids keep growing: a bot that is polling remembers the last id it confirmed and would drop anything numbered below it. The `allowed_updates` subscription, configured webhook and signing token stay. Inline/prepared id counters also keep growing to avoid collisions with retained client ids. A Serverless project's database is not reset.
+Update ids keep growing: a bot that is polling remembers the last id it confirmed and would drop anything numbered below it. The `allowed_updates` subscription, configured webhook and signing token stay. Inline/prepared, shared-widget and widget-query id counters also keep growing to avoid collisions with retained client ids. A Serverless project's database is not reset.
 
 ```bash
 curl -s -X POST $O/sim/reset

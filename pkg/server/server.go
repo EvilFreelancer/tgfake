@@ -125,21 +125,25 @@ type Server struct {
 
 	// token is the one in the path of the latest Bot API call: what launch
 	// data is signed with when Options.Token is not set.
-	token          string
-	defaultMenu    *botapi.MenuButton           // the bot's menu button; nil shows its commands
-	chatMenus      map[int64]*botapi.MenuButton // private chats' own menu buttons
-	nextQuery      int                          // numbers the query_id of Mini App launches
-	webQueries     map[string]webQuery
-	inlineQueries  map[string]*inlineQueryState
-	inlineMessages map[string]*storedMessage
-	prepared       map[string]preparedMessage
-	profiles       map[int64]botapi.UserProfilePhotos
-	nextInline     int
-	nextAlbum      int
-	webhook        webhookState
-	webhookDone    chan struct{}
-	networkCtx     context.Context
-	stopNetwork    context.CancelFunc
+	token           string
+	defaultMenu     *botapi.MenuButton           // the bot's menu button; nil shows its commands
+	chatMenus       map[int64]*botapi.MenuButton // private chats' own menu buttons
+	nextQuery       int                          // numbers the query_id of Mini App launches
+	webQueries      map[string]webQuery
+	inlineQueries   map[string]*inlineQueryState
+	inlineMessages  map[string]*storedMessage
+	prepared        map[string]preparedMessage
+	profiles        map[int64]botapi.UserProfilePhotos
+	nextInline      int
+	nextAlbum       int
+	sharedWidgets   map[string]*sharedWidget
+	widgetQueries   map[string]*widgetAnswer
+	nextWidget      int
+	nextWidgetQuery int
+	webhook         webhookState
+	webhookDone     chan struct{}
+	networkCtx      context.Context
+	stopNetwork     context.CancelFunc
 }
 
 // New returns a Server with nothing in it.
@@ -178,6 +182,8 @@ func New(opts Options) *Server {
 		prepared:       map[string]preparedMessage{},
 		webhookDone:    make(chan struct{}),
 		profiles:       map[int64]botapi.UserProfilePhotos{},
+		sharedWidgets:  map[string]*sharedWidget{},
+		widgetQueries:  map[string]*widgetAnswer{},
 	}
 	s.networkCtx, s.stopNetwork = context.WithCancel(context.Background())
 	go s.deliverWebhooks()
@@ -241,6 +247,8 @@ func (s *Server) Reset() {
 	s.inlineMessages = map[string]*storedMessage{}
 	s.prepared = map[string]preparedMessage{}
 	s.profiles = map[int64]botapi.UserProfilePhotos{}
+	s.sharedWidgets = map[string]*sharedWidget{}
+	s.widgetQueries = map[string]*widgetAnswer{}
 	s.wakeLocked()
 }
 
