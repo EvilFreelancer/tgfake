@@ -1,6 +1,6 @@
 # The Bot API surface
 
-This page describes the part of the tgfake server a bot talks to: the Bot API methods it serves, how it reads their parameters, what it answers, the refusals it shares with Telegram and what it does not implement. The code is in [`pkg/server`](../pkg/server): [`methods.go`](../pkg/server/methods.go), [`updates.go`](../pkg/server/updates.go), [`chat.go`](../pkg/server/chat.go), [`faults.go`](../pkg/server/faults.go), [`webapp.go`](../pkg/server/webapp.go) and [`response.go`](../pkg/server/response.go). The person's side of the same chats is the [simulation API](sim-api.md).
+This page describes the part of the tgfake server a bot talks to: the Bot API methods it serves, how it reads their parameters, what it answers, the refusals it shares with Telegram and what it does not implement. The code is in [`pkg/server`](../pkg/server): [`methods.go`](../pkg/server/methods.go), [`updates.go`](../pkg/server/updates.go), [`chat.go`](../pkg/server/chat.go), [`faults.go`](../pkg/server/faults.go), [`webapp.go`](../pkg/server/webapp.go), [`widgets.go`](../pkg/server/widgets.go) and [`response.go`](../pkg/server/response.go). The person's side of the same chats is the [simulation API](sim-api.md).
 
 ## Addressing
 
@@ -62,6 +62,11 @@ A call is checked in this order: the token (401), then a fault scheduled through
 | `sendAudio` | Same, with `audio`; `duration`, `performer`, `title` | The sent `Message` with an `Audio`. |
 | `sendVoice` | Same, with `voice`; `duration` | The sent `Message` with a voice message. |
 | `sendVideoNote` | `chat_id`, `video_note` (upload or known id), `duration`, `length`, keyboard, reply and protection parameters | The sent `Message` with a video note; no caption. |
+| `sendWidget` | `chat_id`, `html`, `width`, `height`, `public_data`, `chat_data`, `caption`, `parse_mode`, `caption_entities`, `show_caption_above_media`, `allow_queries`, `is_shared`, keyboard, reply and protection parameters | The sent `Message` with an HTML `Widget`. |
+| `sendSharedWidget` | `chat_id`, `widget_id`, `chat_data`, caption, keyboard, reply and protection parameters | Another `Message` showing the same shared widget and its current public data. |
+| `editMessageWidgetData` | `chat_id` and `message_id`, or `inline_message_id`; optional `public_data`, `chat_data` | `true`; changes only the fields present, with an empty string clearing one. |
+| `editSharedWidgetData` | `widget_id`, `public_data`, optional `cache_time` | `true`; changes public data in every message and forward of the shared widget. |
+| `answerWidgetQuery` | `widget_query_id`, optional `data` | `true`; the result is available only to the widget that asked. |
 | `sendMediaGroup` | `chat_id`, `media` (array of photo/video/audio/document input media), reply and protection parameters | An array of messages sharing a `media_group_id`. Photo/video may mix; audio and document albums must be homogeneous. |
 | `sendLocation` | `chat_id`, `latitude`, `longitude`, keyboard, reply and protection parameters | A `Message` with a static location. |
 | `sendVenue` | Same, plus `title`, `address`, Foursquare/Google place fields | A `Message` with a venue and its location. |
@@ -151,6 +156,16 @@ The bot must be an administrator with `can_restrict_members` for restrict, ban, 
 
 **Stopping a draft (Bot API 10.3).** A revision with `can_stop=true` shows the person a Stop button under the draft; each revision replaces the previous one's `can_stop` and `keep_on_stop`. Pressing it (`POST /sim/draft/stop`) queues a `stopped_message_generation` update carrying the chat, the revision's `message_thread_id` when it had one, and the `draft_id`. The draft leaves the transcript at once unless its latest revision set `keep_on_stop=true`, in which case it stays without the Stop button until it expires; a new revision with `can_stop=true` shows the button again. A later revision of a stopped draft is accepted: the Bot API documentation does not say what Telegram answers to one.
 
+**HTML widgets.** `sendWidget` stores the immutable HTML and size anchors in `message.widget`, together with opaque `public_data` and per-message `chat_data`. HTML is 1-32768 bytes of valid UTF-8 without NUL and at most 4096 bytes after zlib compression at level 9. Either state is 0-1024 bytes and the caption is at most 1024 characters. `allow_queries` permits data requests; `is_shared` also returns a `widget.id` such as `widget-1`. `sendSharedWidget` uses that id, keeps the code and current public state, and gives the new message its own chat state. Shared ids and widget query ids keep growing across a reset.
+
+`editMessageWidgetData` changes only the state fields present in the call and never sets `edit_date` or the transcript's `edited` flag. On a shared widget its public edit reaches every original and forward. `editSharedWidgetData` does the same by id and retains the refresh period, 30 seconds initially; `cache_time` below 5 is refused and above 3600 is clamped. An edit that changes nothing is `Bad Request: message is not modified`.
+
+A widget cannot be copied. Forwarding clears `chat_data`; a static forward keeps a snapshot of `public_data` and cannot make requests, while a shared forward follows the shared public state and may make requests when they were allowed. Such a request arrives as `shared_widget_query` with no chat or message location. An original arrives as `widget_query` with `type: {"type":"data"}`, 1-64 bytes of `data`, the authenticated user and the message coordinates. Both update kinds participate in `allowed_updates` and webhooks. `answerWidgetQuery` takes one answer of at most 1024 bytes; it changes no state. A second answer, or one after reset, uses the usual invalid-query refusal.
+
+On the chat page every widget runs in a sandboxed iframe. CSP blocks subresource loads and connections, and the supplied `TelegramWidget` supports `chatData`, `publicData`, `viewer`, `chatType`, `isForward`, `isPreview`, theme properties and events, `onEvent`/`offEvent`, `request`, `ready`, `openLink`, `openTelegramLink`, `copyText`, `watchPublicData`/`unwatchPublicData`, `setResizeAnchor`, content safe-area values and no-op haptics. State edits are pushed into the existing iframe, `chatDataChanged` before `publicDataChanged`, so the page is not restarted. A request's Promise receives the answer or `NOT_ALLOWED`, `BUSY`, `FAILED` or `TIMEOUT` after 15 seconds. The Bot API accepts an answer only within those 15 seconds.
+
+This is a browser JavaScript approximation for debugging, not Telegram's QuickJS engine, widget-profile validator or a security boundary. Browser-only APIs may work, Web Storage is unavailable, and shared state is pushed immediately rather than polled at `cache_time`. A static page cannot reliably stop a widget navigating its own iframe, so self-navigation can still make a network request despite CSP. Do not put secrets in widget code or state.
+
 **Typing.** `sendChatAction` makes the chat show "typing…" for 5 seconds (`typingWindow`), whatever the `action`.
 
 ## Commands
@@ -186,6 +201,10 @@ The person pays an invoice with `POST /sim/invoice/pay`, which queues a `pre_che
 | inline results | At most 50; result ids contain 1 to 64 bytes. |
 | prepared message | 5 minutes in the stand. |
 | `copy_text.text` | 1 to 256 characters. |
+| widget `html` | 1 to 32768 UTF-8 bytes without NUL, and at most 4096 bytes after zlib level 9 compression. |
+| widget `public_data`, `chat_data`, or a widget query answer | At most 1024 bytes each. |
+| widget request `data` | 1 to 64 bytes. |
+| shared widget `cache_time` | 5 to 3600 seconds; larger values are clamped, 30 by default. |
 | a bot command | 1 to 32 lower-case Latin letters, digits and `_` after trimming and dropping a leading `/`; its description 1 to 256 characters after trimming. |
 | `title` of `sendInvoice` | Not blank; cut to 64 characters. |
 | `description` of `sendInvoice` | Not empty; cut to 255 characters. |
@@ -289,6 +308,14 @@ Additional refusals for the extended methods:
 | `getUpdates` | webhook active (409) | `Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first` |
 | `setWebhook` | malformed URL / external HTTP / unsupported external port | `Bad Request: invalid webhook URL specified` / `Bad Request: bad webhook: An HTTPS URL must be provided for webhook` / `Bad Request: bad webhook: Webhook can be set up only on ports 80, 88, 443 or 8443` |
 | `setWebhook` | secret over 256 bytes / characters outside A-Z, a-z, 0-9, `_`, `-` | `Bad Request: secret token is too long` / `Bad Request: secret token contains illegal characters` |
+| `sendWidget` | HTML empty, invalid UTF-8 or containing NUL / raw or compressed HTML too large | `Bad Request: INPUT_MEDIA_WIDGET_HTML_INVALID` / `Bad Request: INPUT_MEDIA_WIDGET_TOO_LARGE` |
+| widget send or edit | `public_data` or `chat_data` over 1024 bytes | `Bad Request: INPUT_MEDIA_WIDGET_DATA_INVALID` |
+| `sendWidget`, `sendSharedWidget` | caption over 1024 characters | `Bad Request: message caption is too long` |
+| `sendSharedWidget`, `editSharedWidgetData` | unknown/reset `widget_id` | `Bad Request: widget not found` |
+| `editSharedWidgetData` | `public_data` omitted / `cache_time` below 5 | `Bad Request: parameter "public_data" is required` / `Bad Request: CACHE_TIME_INVALID` |
+| widget data edit | target missing, deleted, not a widget or a forward / unchanged | `Bad Request: message can't be edited` (the usual target error when missing) / `Bad Request: message is not modified` |
+| `answerWidgetQuery` | answer over 1024 bytes / unknown, reset or already answered query | `Bad Request: data is too long` / the usual invalid-query error above |
+| `copyMessage`, `copyMessages` | source is a widget | `Bad Request: the message can't be copied` |
 
 The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate decoding failures currently use `Bad Request: invalid certificate` rather than OpenSSL's platform-specific diagnostic; this is a deliberate validation approximation. Delivery/network diagnostics come from Go's HTTP client. Advanced parameters not listed here are recorded without affecting state.
 
@@ -296,7 +323,8 @@ The stand checks copied text length with `BUTTON_COPY_TEXT_INVALID`. Certificate
 
 - Methods outside the [table above](#methods) answer `404` with `Not Found: method not found`, including stickers, polls, live photos, games and forum topics.
 - Incoming location/contact messages, `edited_message`, `channel_post`, membership and reaction updates are not injected. Chat configuration changes no update queue.
-- Inline games/stickers, rich input content, cache behavior, pagination buttons and query timeouts are not modelled. `cache_time`, `is_personal`, `next_offset` and the inline results button are only recorded.
+- Inline games/stickers, rich input content, cache behavior, pagination buttons and query timeouts are not modelled. `cache_time`, `is_personal`, `next_offset` and the inline results button are only recorded. Inline widget message content and widget previews are not implemented.
+- Widget wallet cards, `sign_data` and `sent_transaction` queries are not modelled; only `type: {"type":"data"}` is produced. The chat page uses browser JavaScript rather than QuickJS and does not enforce Telegram's full widget DOM/CSS profile or Web Storage.
 - Payments go no further than a bot can see: a payment provider, shipping, order info and `order_info` on the pre-checkout query and the payment are not modelled, `shipping_query` is never sent, and a charge can only be taken or returned - never left pending. `is_ephemeral` of a command is kept but a message is never ephemeral.
 - Media thumbnails, codec validation, live locations, full Telegram membership/permission enforcement and service-message copy restrictions other than an invoice's are not modelled. Inline media edits currently resolve uploads as ordinary edits; Telegram permits only existing ids and URLs for inline targets.
 - Formatting: `parse_mode` is not parsed, so `can't parse entities` never happens on its own. Schedule a fault with `contains` to see it ([sim-api.md](sim-api.md#faults)).

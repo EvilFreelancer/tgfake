@@ -84,6 +84,12 @@ func (s *Server) serveBotAPI(w http.ResponseWriter, r *http.Request) {
 		s.getFile(w, method, params)
 	case "sendmediagroup":
 		s.sendMediaGroup(w, r, method, params)
+	case "sendwidget", "sendsharedwidget":
+		s.sendWidget(w, method, params)
+	case "editmessagewidgetdata", "editsharedwidgetdata":
+		s.editWidgetData(w, method, params)
+	case "answerwidgetquery":
+		s.answerWidgetQuery(w, method, params)
 	case "editmessagecaption", "editmessagemedia":
 		s.editMedia(w, r, method, params)
 	case "copymessage", "forwardmessage", "copymessages", "forwardmessages":
@@ -334,7 +340,7 @@ func (s *Server) editMessage(w http.ResponseWriter, method string, params url.Va
 		return
 	}
 	if strings.EqualFold(method, "editMessageText") {
-		if target.file != nil || target.msg.Location != nil || target.msg.Contact != nil {
+		if target.file != nil || target.msg.Widget != nil || target.msg.Location != nil || target.msg.Contact != nil {
 			s.mu.Unlock()
 			s.writeError(w, method, params, 400, "Bad Request: there is no text in the message to edit", 0)
 			return

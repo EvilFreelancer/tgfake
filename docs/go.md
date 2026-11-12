@@ -45,6 +45,8 @@ t.Cleanup(func() {
 |--------|--------------|
 | `InjectMessage(in IncomingMessage) (updateID, messageID int)` | The person sends a message; it is stored in the chat and queued as the next update. |
 | `InjectCallback(in IncomingCallback) (updateID int, callbackID string, err error)` | The person taps a button, by `Label` or by `Data`; an error says why nothing could be tapped. |
+| `InjectWidgetQuery(in IncomingWidgetQuery) (updateID int, queryID string, err error)` | A visible widget calls `TelegramWidget.request`; queues `widget_query`, or `shared_widget_query` for a forward of a shared widget. |
+| `WidgetAnswer(queryID string) (data string, answered, ok bool)` | Read a bot's `answerWidgetQuery` result; `ok` distinguishes an unknown query, and `answered` an unanswered one. |
 | `StopDraft(in DraftStop) (updateID int, err error)` | The person presses Stop under a draft streamed with `can_stop`; an error says why nothing could be stopped. |
 | `PayInvoice(in InvoicePay) (updateID int, queryID string, err error)` | The person starts paying an invoice; the answer is the `pre_checkout_query` it queued. No money moves until the bot confirms. |
 | `InjectPayment(in IncomingPayment) (updateID, messageID int, err error)` | A payment service message arrives: a `successful_payment`, or a `refunded_payment` when `Kind` says so; an error says why nothing could be delivered. |
@@ -86,7 +88,7 @@ The outbox records every call when the stand answers it, refused ones included, 
 - `FindButton(label string) (messageID int, data string, ok bool)` finds a button by its visible text: the newest message that is not deleted and shows it wins, and a `✓ ` prefix is ignored on both sides. It returns the message and the button's `callback_data`.
 - `Text() string` renders the transcript as plain lines, the text format of [sim-api.md](sim-api.md#the-text-format).
 
-A `MessageView` has `MessageID`, `From` (`"bot"` or `"user"`), `Username`, `Text`, `Caption`, `Photo`, `Document`, `Video`, `Audio`, `Voice`, `Animation`, `VideoNote` (`*FileView`), `Location`, `Venue`, `Contact`, `WebAppData`, `MediaGroupID`, `ForwardOrigin`, `ParseMode`, `ReplyToMessageID`, `Edited`, `Deleted`, `Rich` and `Keyboard`. A `Call` has `Seq`, `At`, `Method`, `Params` (the first value of each parameter), `Status` and `Response` (the raw JSON answered).
+A `MessageView` has `MessageID`, `From` (`"bot"` or `"user"`), `Username`, `Text`, `Caption`, `Photo`, `Document`, `Video`, `Audio`, `Voice`, `Animation`, `VideoNote` (`*FileView`), `Widget`, `WidgetAllowQueries`, `WidgetForward`, `ShowCaptionAboveMedia`, `Location`, `Venue`, `Contact`, `WebAppData`, `MediaGroupID`, `ForwardOrigin`, `ParseMode`, `ReplyToMessageID`, `Edited`, `Deleted`, `Rich` and `Keyboard`. A `Call` has `Seq`, `At`, `Method`, `Params` (the first value of each parameter), `Status` and `Response` (the raw JSON answered).
 
 ### Faults
 
@@ -105,11 +107,11 @@ fake.SetFault(server.Fault{Method: "sendMessage", Code: 429, RetryAfter: 1, Time
 
 ### Reset
 
-`Reset()` forgets chats and configured information, the outbox, faults, commands, callback/inline/Mini App queries, prepared messages, menu buttons and uploaded files. Update and inline ids keep growing; the subscription and webhook stay. `Close()` also cancels webhook requests and media URL downloads and waits for the webhook worker to exit.
+`Reset()` forgets chats and configured information, the outbox, faults, commands, callback/inline/Mini App/widget queries, shared widgets, prepared messages, menu buttons and uploaded files. Update, inline, shared-widget and widget-query ids keep growing; the subscription and webhook stay. `Close()` also cancels webhook requests and media URL downloads and waits for the webhook worker to exit.
 
 ### Exported names
 
-The constants `DefaultBotUsername`, `DefaultBotFirstName` and `DefaultBotID` are the bot a stand with no options plays. Besides the types above, the request/view types are `IncomingMedia`, `IncomingInlineQuery`, `InlineChoice`, `InlineQueryView`, `WebAppSubmission`, `PreparedMessageShare`, `ChatConfiguration` and `UserProfileConfiguration`. Their fields match the bodies in [sim-api.md](sim-api.md).
+The constants `DefaultBotUsername`, `DefaultBotFirstName` and `DefaultBotID` are the bot a stand with no options plays. Besides the types above, the request/view types are `IncomingMedia`, `IncomingInlineQuery`, `IncomingWidgetQuery`, `InlineChoice`, `InlineQueryView`, `WebAppSubmission`, `PreparedMessageShare`, `ChatConfiguration` and `UserProfileConfiguration`. Their fields match the bodies in [sim-api.md](sim-api.md).
 
 ### A complete test
 
@@ -223,7 +225,7 @@ t.Cleanup(func() {
 
 ## pkg/botapi
 
-The wire shapes of the Bot API objects the stand sends and reads, written for the stand rather than borrowed from a Telegram library. In addition to messages, updates, users, chats and keyboards, these include `File`, `Video`, `Audio`, `VideoNote`, `Location`, `Venue`, `Contact`, `WebAppData`, `InlineQuery`, `ChosenInlineResult`, `SentWebAppMessage`, `PreparedInlineMessage`, `MessageID`, `MessageOrigin`, `UserProfilePhotos`, `BotCommand`, `BotCommandScope`, `LabeledPrice`, `Invoice`, `PreCheckoutQuery`, `SuccessfulPayment` and `RefundedPayment`. `ChatFullInfo` and `ChatMember` are map types so tests can configure the many optional Telegram fields. They carry the subset of fields the stand produces. A test decodes what the stand answered with them, for example the message a call returned:
+The wire shapes of the Bot API objects the stand sends and reads, written for the stand rather than borrowed from a Telegram library. In addition to messages, updates, users, chats and keyboards, these include `File`, `Video`, `Audio`, `VideoNote`, `Widget`, `WidgetQuery`, `SharedWidgetQuery`, `WidgetQueryType`, `Location`, `Venue`, `Contact`, `WebAppData`, `InlineQuery`, `ChosenInlineResult`, `SentWebAppMessage`, `PreparedInlineMessage`, `MessageID`, `MessageOrigin`, `UserProfilePhotos`, `BotCommand`, `BotCommandScope`, `LabeledPrice`, `Invoice`, `PreCheckoutQuery`, `SuccessfulPayment` and `RefundedPayment`. `ChatFullInfo` and `ChatMember` are map types so tests can configure the many optional Telegram fields. They carry the subset of fields the stand produces. A test decodes what the stand answered with them, for example the message a call returned:
 
 ```go
 call := fake.Calls("sendMessage")[0]

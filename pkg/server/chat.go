@@ -33,16 +33,18 @@ type chatState struct {
 // storedMessage is a message plus what the transcript view wants to know
 // about it.
 type storedMessage struct {
-	replyKeyboard  *botapi.ReplyKeyboardMarkup
-	removeKeyboard *botapi.ReplyKeyboardRemove
-	forceReply     *ForceReplyView
-	msg            botapi.Message
-	fromBot        bool
-	parseMode      string
-	edited         bool
-	deleted        bool
-	rich           bool
-	file           *storedFile // the upload a photo or document message carries
+	replyKeyboard      *botapi.ReplyKeyboardMarkup
+	removeKeyboard     *botapi.ReplyKeyboardRemove
+	forceReply         *ForceReplyView
+	msg                botapi.Message
+	fromBot            bool
+	parseMode          string
+	edited             bool
+	deleted            bool
+	rich               bool
+	file               *storedFile // the upload a photo or document message carries
+	widgetAllowQueries bool
+	widgetForward      bool
 	// invoicePayload is the payload the bot gave sendInvoice. It is not part
 	// of the wire Invoice object; the pre-checkout query and the payment
 	// service message carry it back to the bot.
@@ -124,6 +126,7 @@ func (m *storedMessage) clone() *botapi.Message {
 	out.From = copyPointer(m.msg.From)
 	out.Video, out.Animation, out.Audio, out.Voice, out.VideoNote = copyPointer(m.msg.Video), copyPointer(m.msg.Animation), copyPointer(m.msg.Audio), copyPointer(m.msg.Voice), copyPointer(m.msg.VideoNote)
 	out.Location, out.Contact, out.Venue, out.WebAppData = copyPointer(m.msg.Location), copyPointer(m.msg.Contact), copyPointer(m.msg.Venue), copyPointer(m.msg.WebAppData)
+	out.Widget = copyPointer(m.msg.Widget)
 	out.ViaBot = copyPointer(m.msg.ViaBot)
 	out.Invoice, out.SuccessfulPayment, out.RefundedPayment = copyPointer(m.msg.Invoice), copyPointer(m.msg.SuccessfulPayment), copyPointer(m.msg.RefundedPayment)
 	out.ForwardOrigin = copyPointer(m.msg.ForwardOrigin)
@@ -235,39 +238,43 @@ func (v ChatView) FindButton(label string) (messageID int, data string, ok bool)
 
 // MessageView is one message of a ChatView.
 type MessageView struct {
-	ReplyKeyboard       *botapi.ReplyKeyboardMarkup     `json:"reply_keyboard,omitempty"`
-	RemoveKeyboard      *botapi.ReplyKeyboardRemove     `json:"remove_keyboard,omitempty"`
-	ForceReply          *ForceReplyView                 `json:"force_reply,omitempty"`
-	MessageID           int                             `json:"message_id"`
-	From                string                          `json:"from"` // "bot" or "user"
-	Username            string                          `json:"username,omitempty"`
-	Text                string                          `json:"text"`
-	Caption             string                          `json:"caption,omitempty"`
-	Entities            []botapi.MessageEntity          `json:"entities,omitempty"`
-	CaptionEntities     []botapi.MessageEntity          `json:"caption_entities,omitempty"`
-	Photo               *FileView                       `json:"photo,omitempty"`
-	Document            *FileView                       `json:"document,omitempty"`
-	Video               *FileView                       `json:"video,omitempty"`
-	Audio               *FileView                       `json:"audio,omitempty"`
-	Voice               *FileView                       `json:"voice,omitempty"`
-	Animation           *FileView                       `json:"animation,omitempty"`
-	VideoNote           *FileView                       `json:"video_note,omitempty"`
-	Location            *botapi.Location                `json:"location,omitempty"`
-	Venue               *botapi.Venue                   `json:"venue,omitempty"`
-	Contact             *botapi.Contact                 `json:"contact,omitempty"`
-	WebAppData          *botapi.WebAppData              `json:"web_app_data,omitempty"`
-	Invoice             *botapi.Invoice                 `json:"invoice,omitempty"`
-	SuccessfulPayment   *botapi.SuccessfulPayment       `json:"successful_payment,omitempty"`
-	RefundedPayment     *botapi.RefundedPayment         `json:"refunded_payment,omitempty"`
-	MediaGroupID        string                          `json:"media_group_id,omitempty"`
-	ForwardOrigin       *botapi.MessageOrigin           `json:"forward_origin,omitempty"`
-	HasProtectedContent bool                            `json:"has_protected_content,omitempty"`
-	ParseMode           string                          `json:"parse_mode,omitempty"`
-	ReplyToMessageID    int                             `json:"reply_to_message_id,omitempty"`
-	Edited              bool                            `json:"edited"`
-	Deleted             bool                            `json:"deleted"`
-	Rich                bool                            `json:"rich"`
-	Keyboard            [][]botapi.InlineKeyboardButton `json:"keyboard,omitempty"`
+	ReplyKeyboard         *botapi.ReplyKeyboardMarkup     `json:"reply_keyboard,omitempty"`
+	RemoveKeyboard        *botapi.ReplyKeyboardRemove     `json:"remove_keyboard,omitempty"`
+	ForceReply            *ForceReplyView                 `json:"force_reply,omitempty"`
+	MessageID             int                             `json:"message_id"`
+	From                  string                          `json:"from"` // "bot" or "user"
+	Username              string                          `json:"username,omitempty"`
+	Text                  string                          `json:"text"`
+	Caption               string                          `json:"caption,omitempty"`
+	Entities              []botapi.MessageEntity          `json:"entities,omitempty"`
+	CaptionEntities       []botapi.MessageEntity          `json:"caption_entities,omitempty"`
+	Photo                 *FileView                       `json:"photo,omitempty"`
+	Document              *FileView                       `json:"document,omitempty"`
+	Video                 *FileView                       `json:"video,omitempty"`
+	Audio                 *FileView                       `json:"audio,omitempty"`
+	Voice                 *FileView                       `json:"voice,omitempty"`
+	Animation             *FileView                       `json:"animation,omitempty"`
+	VideoNote             *FileView                       `json:"video_note,omitempty"`
+	Widget                *botapi.Widget                  `json:"widget,omitempty"`
+	WidgetAllowQueries    bool                            `json:"widget_allow_queries,omitempty"`
+	WidgetForward         bool                            `json:"widget_forward,omitempty"`
+	ShowCaptionAboveMedia bool                            `json:"show_caption_above_media,omitempty"`
+	Location              *botapi.Location                `json:"location,omitempty"`
+	Venue                 *botapi.Venue                   `json:"venue,omitempty"`
+	Contact               *botapi.Contact                 `json:"contact,omitempty"`
+	WebAppData            *botapi.WebAppData              `json:"web_app_data,omitempty"`
+	Invoice               *botapi.Invoice                 `json:"invoice,omitempty"`
+	SuccessfulPayment     *botapi.SuccessfulPayment       `json:"successful_payment,omitempty"`
+	RefundedPayment       *botapi.RefundedPayment         `json:"refunded_payment,omitempty"`
+	MediaGroupID          string                          `json:"media_group_id,omitempty"`
+	ForwardOrigin         *botapi.MessageOrigin           `json:"forward_origin,omitempty"`
+	HasProtectedContent   bool                            `json:"has_protected_content,omitempty"`
+	ParseMode             string                          `json:"parse_mode,omitempty"`
+	ReplyToMessageID      int                             `json:"reply_to_message_id,omitempty"`
+	Edited                bool                            `json:"edited"`
+	Deleted               bool                            `json:"deleted"`
+	Rich                  bool                            `json:"rich"`
+	Keyboard              [][]botapi.InlineKeyboardButton `json:"keyboard,omitempty"`
 }
 
 // FileView is the photo or document of a MessageView.
@@ -340,21 +347,25 @@ func (c *chatState) view(now time.Time) ChatView {
 	}
 	for _, m := range c.messages {
 		mv := MessageView{
-			ReplyKeyboard:   cloneReplyKeyboard(m.replyKeyboard),
-			RemoveKeyboard:  copyPointer(m.removeKeyboard),
-			ForceReply:      copyPointer(m.forceReply),
-			MessageID:       m.msg.MessageID,
-			From:            "user",
-			Text:            m.msg.Text,
-			Caption:         m.msg.Caption,
-			Entities:        append([]botapi.MessageEntity(nil), m.msg.Entities...),
-			CaptionEntities: append([]botapi.MessageEntity(nil), m.msg.CaptionEntities...),
-			ParseMode:       m.parseMode,
-			Edited:          m.edited,
-			Deleted:         m.deleted,
-			Rich:            m.rich,
+			ReplyKeyboard:         cloneReplyKeyboard(m.replyKeyboard),
+			RemoveKeyboard:        copyPointer(m.removeKeyboard),
+			ForceReply:            copyPointer(m.forceReply),
+			MessageID:             m.msg.MessageID,
+			From:                  "user",
+			Text:                  m.msg.Text,
+			Caption:               m.msg.Caption,
+			Entities:              append([]botapi.MessageEntity(nil), m.msg.Entities...),
+			CaptionEntities:       append([]botapi.MessageEntity(nil), m.msg.CaptionEntities...),
+			ParseMode:             m.parseMode,
+			Edited:                m.edited,
+			Deleted:               m.deleted,
+			Rich:                  m.rich,
+			WidgetAllowQueries:    m.widgetAllowQueries,
+			WidgetForward:         m.widgetForward,
+			ShowCaptionAboveMedia: m.msg.ShowCaptionAboveMedia,
 		}
 		wire := m.clone()
+		mv.Widget = wire.Widget
 		mv.Location, mv.Contact, mv.Venue, mv.WebAppData, mv.MediaGroupID, mv.ForwardOrigin = wire.Location, wire.Contact, wire.Venue, wire.WebAppData, wire.MediaGroupID, wire.ForwardOrigin
 		mv.HasProtectedContent = wire.HasProtectedContent
 		mv.Invoice, mv.SuccessfulPayment, mv.RefundedPayment = wire.Invoice, wire.SuccessfulPayment, wire.RefundedPayment
@@ -468,6 +479,15 @@ func (v ChatView) Text() string {
 				kind, file = "video_note", m.VideoNote
 			}
 			sb.WriteString("[" + kind + " " + file.Name + "]")
+			if m.Caption != "" {
+				sb.WriteString(" " + strings.ReplaceAll(m.Caption, "\n", "\n    "))
+			}
+		case m.Widget != nil:
+			label := "[widget]"
+			if m.Widget.ID != "" {
+				label = "[widget shared " + m.Widget.ID + "]"
+			}
+			sb.WriteString(label)
 			if m.Caption != "" {
 				sb.WriteString(" " + strings.ReplaceAll(m.Caption, "\n", "\n    "))
 			}

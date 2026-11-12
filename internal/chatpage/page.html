@@ -29,6 +29,9 @@
   .call.err .m { color: #d33; }
   .tools { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; font-size: 12px; }
   .kb button.webapp::after { content: " \2197"; opacity: .7; }
+  .widget { width: 100%; max-width: 600px; min-height: 50px; margin: 4px 0; }
+  .widget-frame { display: block; width: 100%; min-height: 50px; max-height: 600px; border: 0; border-radius: 8px; background: transparent; overflow: hidden; }
+  .widget-caption { white-space: pre-wrap; }
   body.mini-open { grid-template-columns: minmax(0, 1fr) 480px minmax(0, 1fr); }
   @media (max-width: 1100px) { body.mini-open { grid-template-columns: 1fr; height: auto; } }
   #miniapp[hidden] { display: none; }
@@ -187,8 +190,11 @@
   const num = (id) => Number($(id).value) || 0;
   let lastSeq = 0;
   let inlineID = '';
- let replyTo = 0, keyboardKey = '', keyboardOpen = true;
- $('keyboardToggle').addEventListener('click', () => { keyboardOpen = !keyboardOpen; $('replyKeyboard').hidden = !keyboardOpen; });
+  let renderedChatJSON = '';
+  let renderedChatID = 0;
+  const widgetFrames = new Map();
+  let replyTo = 0, keyboardKey = '', keyboardOpen = true;
+  $('keyboardToggle').addEventListener('click', () => { keyboardOpen = !keyboardOpen; $('replyKeyboard').hidden = !keyboardOpen; });
 
   async function post(path, body) {
     const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -205,7 +211,7 @@
     $('text').value = '';
     refreshChat();
   });
-  $('reset').addEventListener('click', async () => { await post('/sim/reset', {}); lastSeq = 0; $('outbox').textContent = ''; refreshChat(); });
+  $('reset').addEventListener('click', async () => { await post('/sim/reset', {}); lastSeq = 0; renderedChatJSON = ''; widgetFrames.clear(); $('outbox').textContent = ''; refreshChat(); });
   $('showPolls').addEventListener('change', () => { lastSeq = 0; $('outbox').textContent = ''; refreshOutbox(); });
   $('inlineButton').addEventListener('click', () => { $('inlinePanel').hidden = false; $('inlineText').focus(); });
   $('inlineClose').addEventListener('click', () => { $('inlinePanel').hidden = true; inlineID = ''; });
@@ -291,6 +297,15 @@
     return box;
   }
 
+  function updateWidgetState(message) {
+    const record = widgetFrames.get(message.message_id);
+    if (!record || !record.frame.contentWindow) return;
+    record.frame.contentWindow.postMessage({ source: 'tgfake', kind: 'state', data: {
+      public_data: message.widget.public_data || null,
+      chat_data: message.widget.chat_data || null,
+    } }, '*');
+  }
+
   async function refreshChat() {
     const chatID = num('chat');
     const v = await (await fetch('/sim/chat/' + chatID)).json();
@@ -316,11 +331,34 @@
       });
       keyboard.appendChild(line);
     });
+    const serialized = JSON.stringify(v);
+    if (renderedChatID === chatID && renderedChatJSON === serialized) { await refreshInline(); return; }
+    renderedChatJSON = serialized;
+    const reusable = new Map();
+    if (renderedChatID === chatID) {
+      for (const m of v.messages) {
+        const record = widgetFrames.get(m.message_id);
+        if (record && sameWidget(record.message, m)) reusable.set(m.message_id, record);
+      }
+    }
+    renderedChatID = chatID;
+    widgetFrames.clear();
     const log = $('log');
     const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
-    log.textContent = '';
+    const reusableContainers = new Set([...reusable.values()].map((record) => record.container));
+    for (const child of [...log.children]) {
+      if (!reusableContainers.has(child)) child.remove();
+    }
     for (const m of v.messages) {
       if (m.deleted) continue;
+      const existing = reusable.get(m.message_id);
+      if (existing) {
+        existing.message = m;
+        widgetFrames.set(m.message_id, existing);
+        updateWidgetState(m);
+        if (existing.container.parentNode !== log) log.appendChild(existing.container);
+        continue;
+      }
       const box = el('div', 'msg ' + (m.from === 'bot' ? 'bot' : 'user'));
       const meta = [ '#' + m.message_id, m.from === 'bot' ? 'bot' : (m.username || 'user') ];
       if (m.parse_mode) meta.push(m.parse_mode);
@@ -359,8 +397,15 @@
         await post('/sim/invoice/pay', { chat_id: chatID, user_id: num('user'), username: $('username').value, message_id: m.message_id });
         refreshChat();
       };
-      if (m.caption) {
+      if (m.caption && !m.widget) {
         box.appendChild(withLinks(m.caption));
+      }
+      if (m.widget) {
+        if (m.caption && m.show_caption_above_media) box.appendChild(withLinks(m.caption));
+        const widget = createWidget(m, v);
+        widgetFrames.get(m.message_id).container = box;
+        box.appendChild(widget);
+        if (m.caption && !m.show_caption_above_media) box.appendChild(withLinks(m.caption));
       }
       if (!m.photo && !m.document) {
         box.appendChild(withLinks(m.text));
@@ -425,6 +470,224 @@
       mb.hidden = true;
     }
     await refreshInline();
+  }
+
+  function sameWidget(before, after) {
+    if (!before.widget || !after.widget) return false;
+    return before.widget.html === after.widget.html && before.widget.id === after.widget.id &&
+      before.widget.width === after.widget.width && before.widget.height === after.widget.height &&
+      before.widget_allow_queries === after.widget_allow_queries && before.widget_forward === after.widget_forward &&
+      before.caption === after.caption && before.show_caption_above_media === after.show_caption_above_media;
+  }
+
+  function createWidget(message, chat) {
+    const box = el('div', 'widget');
+    const frame = el('iframe', 'widget-frame');
+    frame.title = 'Widget in message ' + message.message_id;
+    frame.setAttribute('sandbox', 'allow-scripts');
+    const record = { frame, message };
+    widgetFrames.set(message.message_id, record);
+    const width = Number(message.widget.width) || 0;
+    const height = Number(message.widget.height) || 0;
+    if (width) {
+      box.style.width = Math.min(600, Math.max(200, width)) + 'px';
+      box.style.maxWidth = '100%';
+    }
+    frame.style.height = height ? Math.min(600, Math.max(50, height)) + 'px' : '120px';
+    box.appendChild(frame);
+    loadWidget(record, chat);
+    return box;
+  }
+
+  async function loadWidget(record, chat) {
+    const message = record.message;
+    const theme = $('miniappTheme').value;
+    const themeParams = await (await fetch('/sim/webapp/theme/' + theme)).json();
+    const mayAsk = !!message.widget_allow_queries && (!message.widget_forward || !!message.widget.id);
+    const config = {
+      chatData: message.widget.chat_data || null,
+      publicData: message.widget.public_data || null,
+      allowQueries: mayAsk,
+      canBackground: mayAsk && !message.widget_forward && chat.type === 'private',
+      isForward: !!message.widget_forward,
+      isPreview: false,
+      chatType: message.widget_forward ? null : chat.type,
+      viewer: mayAsk ? { id: num('user'), first_name: $('username').value || 'User', username: $('username').value || undefined, is_premium: false } : null,
+      colorScheme: theme,
+      themeParams,
+      contentSafeAreaInset: { top: 0, bottom: message.caption && !message.show_caption_above_media ? 0 : 28, left: 0, right: 0 },
+    };
+    const serialized = JSON.stringify(config).replace(/</g, '\\u003c');
+    const csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'\">";
+    record.frame.srcdoc = csp + '<script>(' + widgetClient.toString() + ')(' + serialized + ');<\/script>' + message.widget.html;
+  }
+
+  function postToWidget(record, kind, data) {
+    if (record.frame.contentWindow) record.frame.contentWindow.postMessage({ source: 'tgfake', kind, data }, '*');
+  }
+
+  async function answerWidgetRequest(record, request) {
+    const body = { chat_id: num('chat'), user_id: num('user'), username: $('username').value,
+      message_id: record.message.message_id, data: request.data };
+    const response = await post('/sim/widget/query', body);
+    if (!response.ok) {
+      postToWidget(record, 'answer', { request_id: request.request_id, error: 'FAILED' });
+      return;
+    }
+    const injected = await response.json();
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      const answer = await (await fetch('/sim/widget/answer?id=' + encodeURIComponent(injected.widget_query_id))).json();
+      if (answer.answered) {
+        postToWidget(record, 'answer', { request_id: request.request_id, result: answer.result });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    postToWidget(record, 'answer', { request_id: request.request_id, error: 'TIMEOUT' });
+  }
+
+  async function refreshWidgetThemes() {
+    const scheme = $('miniappTheme').value;
+    const params = await (await fetch('/sim/webapp/theme/' + scheme)).json();
+    for (const record of widgetFrames.values()) postToWidget(record, 'theme', { color_scheme: scheme, theme_params: params });
+  }
+
+  function widgetLink(data) {
+    if (!data || typeof data.url !== 'string' || data.url.length > 256) return '';
+    try {
+      const url = new URL(data.url);
+      const telegram = ['t.me', 'telegram.me', 'telegram.dog'].includes(url.hostname);
+      if (url.protocol !== 'https:' || url.username || url.password || telegram !== !!data.telegram) return '';
+      return url.href;
+    } catch (e) { return ''; }
+  }
+
+  window.addEventListener('message', (event) => {
+    for (const record of widgetFrames.values()) {
+      if (event.source !== record.frame.contentWindow) continue;
+      const message = event.data;
+      if (!message || message.source !== 'tgfake-widget') return;
+      switch (message.kind) {
+        case 'request': answerWidgetRequest(record, message.data); break;
+        case 'height':
+          if (!record.message.widget.height) record.frame.style.height = Math.min(600, Math.max(50, Math.ceil(message.data))) + 'px';
+          break;
+        case 'open': { const url = widgetLink(message.data); if (url) openLink(url); break; }
+        case 'copy': if (message.data && String(message.data).length <= 256) navigator.clipboard.writeText(String(message.data)).catch(() => {}); break;
+      }
+      return;
+    }
+  });
+
+  function widgetClient(config) {
+    'use strict';
+    let chatData = config.chatData;
+    let publicData = config.publicData;
+    let colorScheme = config.colorScheme;
+    let themeParams = config.themeParams;
+    let pending = null;
+    let requestSequence = 0;
+    let tapped = false;
+    const listeners = {};
+
+    class WidgetRequestError extends Error {
+      constructor(code) { super(code); this.name = 'WidgetRequestError'; this.code = code; }
+    }
+    function post(kind, data) { parent.postMessage({ source: 'tgfake-widget', kind, data }, '*'); }
+    function emit(type) {
+      for (const callback of (listeners[type] || []).slice()) {
+        try { callback(); } catch (error) { setTimeout(() => { throw error; }, 0); }
+      }
+    }
+    function applyTheme() {
+      const root = document.documentElement;
+      root.style.colorScheme = colorScheme;
+      for (const key of Object.keys(themeParams || {})) root.style.setProperty('--tg-theme-' + key.replace(/_/g, '-'), themeParams[key]);
+    }
+    function consumeTap() {
+      if (config.canBackground) return true;
+      if (!tapped) return false;
+      tapped = false;
+      return true;
+    }
+    function networkDisabled() { throw new DOMException('Network access is disabled in widgets', 'NetworkDisabledError'); }
+    window.fetch = networkDisabled;
+    window.XMLHttpRequest = networkDisabled;
+    window.WebSocket = networkDisabled;
+    document.addEventListener('click', () => { tapped = true; }, true);
+
+    const W = {
+      onEvent(type, callback) { (listeners[type] || (listeners[type] = [])).push(callback); },
+      offEvent(type, callback) { listeners[type] = (listeners[type] || []).filter((item) => item !== callback); },
+      ready() { post('ready', null); },
+      request(data) {
+        return new Promise((resolve, reject) => {
+          if (typeof data !== 'string' || new TextEncoder().encode(data).length < 1 || new TextEncoder().encode(data).length > 64) {
+            reject(new TypeError('data must contain 1-64 bytes'));
+            return;
+          }
+          if (!config.allowQueries || (!config.canBackground && !consumeTap())) { reject(new WidgetRequestError('NOT_ALLOWED')); return; }
+          if (pending) { reject(new WidgetRequestError('BUSY')); return; }
+          const id = ++requestSequence;
+          pending = { resolve, reject };
+          post('request', { request_id: id, data });
+        });
+      },
+      openLink(url) { if (consumeTap()) post('open', { url, telegram: false }); },
+      openTelegramLink(url) { if (consumeTap()) post('open', { url, telegram: true }); },
+      copyText(text) { if (consumeTap()) post('copy', String(text)); },
+      watchPublicData() {},
+      unwatchPublicData() {},
+      setResizeAnchor() {},
+      HapticFeedback: {
+        impactOccurred() {}, notificationOccurred() {}, selectionChanged() {},
+      },
+    };
+    Object.defineProperties(W, {
+      chatData: { get: () => chatData },
+      publicData: { get: () => publicData },
+      viewer: { get: () => config.viewer },
+      chatType: { get: () => config.chatType },
+      isForward: { get: () => config.isForward },
+      isPreview: { get: () => config.isPreview },
+      colorScheme: { get: () => colorScheme },
+      themeParams: { get: () => themeParams },
+      contentSafeAreaInset: { get: () => config.contentSafeAreaInset },
+    });
+    window.TelegramWidget = W;
+    window.addEventListener('message', (event) => {
+      if (event.source !== parent) return;
+      const message = event.data;
+      if (!message || message.source !== 'tgfake') return;
+      if (message.kind === 'state') {
+        const nextChat = message.data.chat_data;
+        const nextPublic = message.data.public_data;
+        const chatChanged = nextChat !== chatData;
+        const publicChanged = nextPublic !== publicData;
+        chatData = nextChat;
+        publicData = nextPublic;
+        if (chatChanged) emit('chatDataChanged');
+        if (publicChanged) emit('publicDataChanged');
+      } else if (message.kind === 'theme') {
+        colorScheme = message.data.color_scheme;
+        themeParams = message.data.theme_params;
+        applyTheme();
+        emit('themeChanged');
+      } else if (message.kind === 'answer' && pending) {
+        const current = pending;
+        pending = null;
+        if (message.data.error) current.reject(new WidgetRequestError(message.data.error));
+        else current.resolve({ result: message.data.result });
+      }
+    });
+    function sendHeight() { post('height', Math.ceil(document.documentElement.scrollHeight)); }
+    document.addEventListener('DOMContentLoaded', () => {
+      applyTheme();
+      sendHeight();
+      if (window.ResizeObserver) new ResizeObserver(sendHeight).observe(document.documentElement);
+    });
+    applyTheme();
   }
 
   async function refreshOutbox() {
@@ -569,7 +832,7 @@
       this.sendViewport();
       this.post('safe_area_changed', this.safeArea());
       this.post('content_safe_area_changed', this.contentSafeArea());
-      if (next.theme) this.sendTheme();
+      if (next.theme) { this.sendTheme(); refreshWidgetThemes(); }
     },
     back() { this.post('back_button_pressed'); },
   };

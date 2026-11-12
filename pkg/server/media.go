@@ -422,8 +422,11 @@ func (s *Server) editMedia(w http.ResponseWriter, req *http.Request, method stri
 	if problem == "" {
 		problem = validateKeyboard(markup, target.msg.Chat.Type, false)
 	}
-	if target.file == nil && replacement == nil && problem == "" {
+	if target.file == nil && target.msg.Widget == nil && replacement == nil && problem == "" {
 		problem = "Bad Request: there is no caption in the message to edit"
+	}
+	if target.msg.Widget != nil && replacement != nil && problem == "" {
+		problem = "Bad Request: message can't be edited"
 	}
 	if problem == "" && replacement != nil && target.msg.MediaGroupID != "" {
 		oldKind := target.file.kind

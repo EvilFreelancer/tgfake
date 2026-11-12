@@ -339,6 +339,10 @@ func updateKind(u botapi.Update) string {
 		return "chosen_inline_result"
 	case u.CallbackQuery != nil:
 		return "callback_query"
+	case u.WidgetQuery != nil:
+		return "widget_query"
+	case u.SharedWidgetQuery != nil:
+		return "shared_widget_query"
 	case u.PreCheckoutQuery != nil:
 		return "pre_checkout_query"
 	case u.StoppedMessageGeneration != nil:

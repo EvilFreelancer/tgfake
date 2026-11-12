@@ -13,8 +13,9 @@ purpose. No token, no phone, no network.
   `answerCallbackQuery`, file downloads, photos/video/audio/voice and albums,
   copy/forward operations, inline results, webhooks, chat information, bot
   commands per scope and language, invoices with the pre-checkout query and
-  the payment service message, the menu button, and the Bot API 10.1 rich
-  messages and drafts with the 10.3 Stop button. Forms, JSON and multipart
+  the payment service message, the menu button, HTML widgets with shared and
+  per-chat state and widget queries, and the Bot API 10.1 rich messages and
+  drafts with the 10.3 Stop button. Forms, JSON and multipart
   are all accepted, so any Bot API library works unchanged.
 - **Strict where Telegram is strict.** An edit that changes nothing, a reply
   to a message that is not there, an answer to an unknown callback query, a
@@ -28,11 +29,11 @@ purpose. No token, no phone, no network.
   and file downloads, and opens
   Mini Apps with launch data signed by the bot's token.
 - **A chat page.** `http://127.0.0.1:18790/` is a Telegram client for the
-  bot: type messages, tap buttons, open Mini Apps in a phone frame and watch
-  the Bot API calls arrive. With `--inline`, an Inline button lets you search
-  and select the bot's results. Links open in Telegram's
-  [in-app browser](docs/in-app-browser.md) on a phone-sized screen, so a site
-  can be checked at the width a Telegram user sees it.
+  bot: type messages, tap buttons, open Mini Apps in a phone frame, run HTML
+  widgets in sandboxed iframes and watch the Bot API calls arrive.
+  With `--inline`, an Inline button lets you search and select the bot's results.
+  Links open in Telegram's [in-app browser](docs/in-app-browser.md) on a
+  phone-sized screen, so a site can be checked at the width a Telegram user sees it.
 - **A scripted model.** `--llm` also serves an OpenAI-compatible
   `/v1/chat/completions` that answers by rule, in turn or by echo, streams
   word by word and can call tools, so an LLM bot runs with no key. Named
