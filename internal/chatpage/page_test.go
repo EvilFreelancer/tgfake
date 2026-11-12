@@ -35,7 +35,7 @@ func TestPageIncludesSandboxedWidgetRuntime(t *testing.T) {
 	page := string(body)
 	for _, part := range []string{
 		"window.TelegramWidget = W",
-		"allow-scripts allow-popups",
+		"sandbox', 'allow-scripts'",
 		"connect-src 'none'",
 		"/sim/widget/query",
 		"/sim/widget/answer",

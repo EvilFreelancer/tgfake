@@ -1,6 +1,6 @@
 Feature: Bots send interactive HTML widgets
   The stand keeps widget code and state in messages, delivers widget queries
-  and runs the widget on the chat page without network access.
+  and runs the widget in a restricted chat-page iframe.
 
   Scenario: A person asks a widget for fresh data
     Given an offline Telegram stand

@@ -190,7 +190,7 @@
   const num = (id) => Number($(id).value) || 0;
   let lastSeq = 0;
   let inlineID = '';
-  let renderedChat = null;
+  let renderedChatJSON = '';
   let renderedChatID = 0;
   const widgetFrames = new Map();
   let replyTo = 0, keyboardKey = '', keyboardOpen = true;
@@ -211,7 +211,7 @@
     $('text').value = '';
     refreshChat();
   });
-  $('reset').addEventListener('click', async () => { await post('/sim/reset', {}); lastSeq = 0; renderedChat = null; widgetFrames.clear(); $('outbox').textContent = ''; refreshChat(); });
+  $('reset').addEventListener('click', async () => { await post('/sim/reset', {}); lastSeq = 0; renderedChatJSON = ''; widgetFrames.clear(); $('outbox').textContent = ''; refreshChat(); });
   $('showPolls').addEventListener('change', () => { lastSeq = 0; $('outbox').textContent = ''; refreshOutbox(); });
   $('inlineButton').addEventListener('click', () => { $('inlinePanel').hidden = false; $('inlineText').focus(); });
   $('inlineClose').addEventListener('click', () => { $('inlinePanel').hidden = true; inlineID = ''; });
@@ -297,13 +297,6 @@
     return box;
   }
 
-  function chatWithoutWidgetData(view) {
-    return JSON.stringify(view, (key, value) => {
-      if (key !== 'widget' || !value) return value;
-      return Object.assign({}, value, { public_data: null, chat_data: null });
-    });
-  }
-
   function updateWidgetState(message) {
     const record = widgetFrames.get(message.message_id);
     if (!record || !record.frame.contentWindow) return;
@@ -338,23 +331,34 @@
       });
       keyboard.appendChild(line);
     });
-    if (renderedChat && renderedChatID === chatID) {
-      if (JSON.stringify(renderedChat) === JSON.stringify(v)) { await refreshInline(); return; }
-      if (chatWithoutWidgetData(renderedChat) === chatWithoutWidgetData(v)) {
-        for (const message of v.messages) if (message.widget) updateWidgetState(message);
-        renderedChat = v;
-        await refreshInline();
-        return;
+    const serialized = JSON.stringify(v);
+    if (renderedChatID === chatID && renderedChatJSON === serialized) { await refreshInline(); return; }
+    renderedChatJSON = serialized;
+    const reusable = new Map();
+    if (renderedChatID === chatID) {
+      for (const m of v.messages) {
+        const record = widgetFrames.get(m.message_id);
+        if (record && sameWidget(record.message, m)) reusable.set(m.message_id, record);
       }
     }
-    renderedChat = v;
     renderedChatID = chatID;
     widgetFrames.clear();
     const log = $('log');
     const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
-    log.textContent = '';
+    const reusableContainers = new Set([...reusable.values()].map((record) => record.container));
+    for (const child of [...log.children]) {
+      if (!reusableContainers.has(child)) child.remove();
+    }
     for (const m of v.messages) {
       if (m.deleted) continue;
+      const existing = reusable.get(m.message_id);
+      if (existing) {
+        existing.message = m;
+        widgetFrames.set(m.message_id, existing);
+        updateWidgetState(m);
+        if (existing.container.parentNode !== log) log.appendChild(existing.container);
+        continue;
+      }
       const box = el('div', 'msg ' + (m.from === 'bot' ? 'bot' : 'user'));
       const meta = [ '#' + m.message_id, m.from === 'bot' ? 'bot' : (m.username || 'user') ];
       if (m.parse_mode) meta.push(m.parse_mode);
@@ -398,7 +402,9 @@
       }
       if (m.widget) {
         if (m.caption && m.show_caption_above_media) box.appendChild(withLinks(m.caption));
-        box.appendChild(createWidget(m, v));
+        const widget = createWidget(m, v);
+        widgetFrames.get(m.message_id).container = box;
+        box.appendChild(widget);
         if (m.caption && !m.show_caption_above_media) box.appendChild(withLinks(m.caption));
       }
       if (!m.photo && !m.document) {
@@ -466,11 +472,19 @@
     await refreshInline();
   }
 
+  function sameWidget(before, after) {
+    if (!before.widget || !after.widget) return false;
+    return before.widget.html === after.widget.html && before.widget.id === after.widget.id &&
+      before.widget.width === after.widget.width && before.widget.height === after.widget.height &&
+      before.widget_allow_queries === after.widget_allow_queries && before.widget_forward === after.widget_forward &&
+      before.caption === after.caption && before.show_caption_above_media === after.show_caption_above_media;
+  }
+
   function createWidget(message, chat) {
     const box = el('div', 'widget');
     const frame = el('iframe', 'widget-frame');
     frame.title = 'Widget in message ' + message.message_id;
-    frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
+    frame.setAttribute('sandbox', 'allow-scripts');
     const record = { frame, message };
     widgetFrames.set(message.message_id, record);
     const width = Number(message.widget.width) || 0;
@@ -539,6 +553,16 @@
     for (const record of widgetFrames.values()) postToWidget(record, 'theme', { color_scheme: scheme, theme_params: params });
   }
 
+  function widgetLink(data) {
+    if (!data || typeof data.url !== 'string' || data.url.length > 256) return '';
+    try {
+      const url = new URL(data.url);
+      const telegram = ['t.me', 'telegram.me', 'telegram.dog'].includes(url.hostname);
+      if (url.protocol !== 'https:' || url.username || url.password || telegram !== !!data.telegram) return '';
+      return url.href;
+    } catch (e) { return ''; }
+  }
+
   window.addEventListener('message', (event) => {
     for (const record of widgetFrames.values()) {
       if (event.source !== record.frame.contentWindow) continue;
@@ -549,8 +573,8 @@
         case 'height':
           if (!record.message.widget.height) record.frame.style.height = Math.min(600, Math.max(50, Math.ceil(message.data))) + 'px';
           break;
-        case 'open': if (message.data && message.data.url) window.open(message.data.url, '_blank', 'noopener'); break;
-        case 'copy': if (message.data) navigator.clipboard.writeText(String(message.data)).catch(() => {}); break;
+        case 'open': { const url = widgetLink(message.data); if (url) openLink(url); break; }
+        case 'copy': if (message.data && String(message.data).length <= 256) navigator.clipboard.writeText(String(message.data)).catch(() => {}); break;
       }
       return;
     }
@@ -603,15 +627,15 @@
             reject(new TypeError('data must contain 1-64 bytes'));
             return;
           }
-          if (!config.allowQueries || !consumeTap()) { reject(new WidgetRequestError('NOT_ALLOWED')); return; }
+          if (!config.allowQueries || (!config.canBackground && !consumeTap())) { reject(new WidgetRequestError('NOT_ALLOWED')); return; }
           if (pending) { reject(new WidgetRequestError('BUSY')); return; }
           const id = ++requestSequence;
           pending = { resolve, reject };
           post('request', { request_id: id, data });
         });
       },
-      openLink(url) { if (consumeTap()) post('open', { url }); },
-      openTelegramLink(url) { if (consumeTap()) post('open', { url }); },
+      openLink(url) { if (consumeTap()) post('open', { url, telegram: false }); },
+      openTelegramLink(url) { if (consumeTap()) post('open', { url, telegram: true }); },
       copyText(text) { if (consumeTap()) post('copy', String(text)); },
       watchPublicData() {},
       unwatchPublicData() {},

@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSendWidgetStoresCodeStateAndCaption(t *testing.T) {
@@ -286,5 +287,65 @@ func TestWidgetQueryHonoursAllowedUpdates(t *testing.T) {
 	batch := updates(t, body)
 	if len(batch) != 1 || batch[0]["widget_query"] == nil || batch[0]["widget_query"].(map[string]any)["data"] != "included" {
 		t.Fatalf("filtered updates: %v", batch)
+	}
+}
+
+func TestWidgetSendAppliesReplyControls(t *testing.T) {
+	s := newStand(t, Options{})
+	status, body := s.call("sendWidget", url.Values{
+		"chat_id": {"4242"}, "html": {"<p>reply</p>"},
+		"reply_markup": {`{"force_reply":true,"input_field_placeholder":"Answer"}`},
+	})
+	if status != 200 {
+		t.Fatalf("sendWidget: %d %v", status, body)
+	}
+	if force := s.fake.Chat(4242).ForceReply; force == nil || force.MessageID != 1 || force.InputFieldPlaceholder != "Answer" {
+		t.Fatalf("ForceReply: %+v", force)
+	}
+
+	_, shared := s.call("sendWidget", url.Values{"chat_id": {"4242"}, "html": {"<p>shared</p>"}, "is_shared": {"true"}})
+	widgetID := result(t, shared)["widget"].(map[string]any)["id"].(string)
+	status, body = s.call("sendSharedWidget", url.Values{
+		"chat_id": {"7"}, "widget_id": {widgetID},
+		"reply_markup": {`{"keyboard":[[{"text":"Again"}]],"input_field_placeholder":"Choose"}`},
+	})
+	if status != 200 {
+		t.Fatalf("sendSharedWidget: %d %v", status, body)
+	}
+	view := s.fake.Chat(7)
+	if view.ReplyKeyboard == nil || view.ReplyKeyboard.Keyboard[0][0].Text != "Again" || view.ReplyKeyboard.InputFieldPlaceholder != "Choose" {
+		t.Fatalf("reply keyboard: %+v", view.ReplyKeyboard)
+	}
+	status, body = s.call("sendWidget", url.Values{
+		"chat_id": {"7"}, "html": {"<p>remove</p>"},
+		"reply_markup": {`{"remove_keyboard":true}`},
+	})
+	if status != 200 || s.fake.Chat(7).ReplyKeyboard != nil {
+		t.Fatalf("remove keyboard: %d %v %+v", status, body, s.fake.Chat(7).ReplyKeyboard)
+	}
+}
+
+func TestAnswerWidgetQueryExpiresAfterFifteenSeconds(t *testing.T) {
+	s := newStand(t, Options{})
+	now := time.Unix(1000, 0)
+	s.fake.now = func() time.Time { return now }
+	s.call("sendWidget", url.Values{"chat_id": {"4242"}, "html": {"<button>Ask</button>"}, "allow_queries": {"true"}})
+	_, queryID, err := s.fake.InjectWidgetQuery(IncomingWidgetQuery{Data: "refresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(14 * time.Second)
+	status, body := s.call("answerWidgetQuery", url.Values{"widget_query_id": {queryID}, "data": {"fresh"}})
+	if status != 200 || body["result"] != true {
+		t.Fatalf("answer before deadline: %d %v", status, body)
+	}
+	_, queryID, err = s.fake.InjectWidgetQuery(IncomingWidgetQuery{Data: "refresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(15 * time.Second)
+	status, body = s.call("answerWidgetQuery", url.Values{"widget_query_id": {queryID}, "data": {"late"}})
+	if status != 400 || body["description"] != queryInvalid {
+		t.Fatalf("answer at deadline: %d %v", status, body)
 	}
 }

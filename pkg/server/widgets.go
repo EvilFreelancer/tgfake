@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/EvilFreelancer/tgfake/pkg/botapi"
@@ -20,6 +21,7 @@ const (
 	widgetDataMax          = 1024
 	widgetQueryDataMax     = 64
 	defaultWidgetCacheTime = 30
+	widgetQueryTimeout     = 15 * time.Second
 )
 
 type sharedWidget struct {
@@ -33,6 +35,7 @@ type sharedWidget struct {
 }
 
 type widgetAnswer struct {
+	created  time.Time
 	answered bool
 	data     string
 }
@@ -136,6 +139,7 @@ func (s *Server) sendWidget(w http.ResponseWriter, method string, params url.Val
 	}
 	stored := chat.appendLocked(message, true, params.Get("parse_mode"), false)
 	stored.widgetAllowQueries = allowQueries
+	chat.applyReplyMarkupLocked(params.Get("reply_markup"), stored)
 	result := stored.clone()
 	s.mu.Unlock()
 	s.writeResult(w, method, params, result)
@@ -269,7 +273,7 @@ func (s *Server) answerWidgetQuery(w http.ResponseWriter, method string, params 
 	}
 	s.mu.Lock()
 	answer := s.widgetQueries[params.Get("widget_query_id")]
-	if answer == nil || answer.answered {
+	if answer == nil || answer.answered || !s.now().Before(answer.created.Add(widgetQueryTimeout)) {
 		s.mu.Unlock()
 		s.writeError(w, method, params, http.StatusBadRequest, "Bad Request: query is too old and response timeout expired or query ID is invalid", 0)
 		return
@@ -341,7 +345,7 @@ func (s *Server) InjectWidgetQuery(in IncomingWidgetQuery) (updateID int, queryI
 
 	s.nextWidgetQuery++
 	id := "wq-" + strconv.Itoa(s.nextWidgetQuery)
-	s.widgetQueries[id] = &widgetAnswer{}
+	s.widgetQueries[id] = &widgetAnswer{created: s.now()}
 	queryType := botapi.WidgetQueryType{Type: "data"}
 	if target.widgetForward {
 		update := botapi.Update{SharedWidgetQuery: &botapi.SharedWidgetQuery{ID: id, From: user, Type: queryType, Data: in.Data, WidgetID: target.msg.Widget.ID}}

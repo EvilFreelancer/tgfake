@@ -30,7 +30,7 @@ purpose. No token, no phone, no network.
   Mini Apps with launch data signed by the bot's token.
 - **A chat page.** `http://127.0.0.1:18790/` is a Telegram client for the
   bot: type messages, tap buttons, open Mini Apps in a phone frame, run HTML
-  widgets in a network-disabled sandbox and watch the Bot API calls arrive.
+  widgets in sandboxed iframes and watch the Bot API calls arrive.
   With `--inline`, an Inline button lets you search and select the bot's results.
   Links open in Telegram's [in-app browser](docs/in-app-browser.md) on a
   phone-sized screen, so a site can be checked at the width a Telegram user sees it.
